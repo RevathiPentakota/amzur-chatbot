@@ -14,7 +14,15 @@ from app.models.user import User
 
 
 class AuthService:
+    @staticmethod
+    def validate_allowed_email(email: str) -> str:
+        normalized_email = email.strip()
+        if not normalized_email.lower().endswith("@amzur.com"):
+            raise HTTPException(status_code=403, detail="Only Amzur employees allowed")
+        return normalized_email
+
     async def register(self, db: AsyncSession, email: str, password: str) -> User:
+        email = self.validate_allowed_email(email)
         existing_user = await db.scalar(select(User).where(User.email == email))
         if existing_user:
             raise HTTPException(status_code=400, detail="Email already registered")
@@ -26,6 +34,7 @@ class AuthService:
         return user
 
     async def login(self, db: AsyncSession, email: str, password: str) -> User:
+        email = self.validate_allowed_email(email)
         user = await db.scalar(select(User).where(User.email == email))
         if not user or not self.verify_password(password, user.hashed_password):
             raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -37,6 +46,7 @@ class AuthService:
         email: str,
         google_id: str,
     ) -> User:
+        email = self.validate_allowed_email(email)
         user = await db.scalar(select(User).where(User.email == email))
         if user:
             if user.google_id != google_id:

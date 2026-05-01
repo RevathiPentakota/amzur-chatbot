@@ -66,9 +66,11 @@ async def google_callback(
     db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse:
     google_user = await auth_service.fetch_google_user_info(code)
+    email = auth_service.validate_allowed_email(google_user["email"])
+
     user = await auth_service.login_or_create_google_user(
         db,
-        email=google_user["email"],
+        email=email,
         google_id=google_user["sub"],
     )
     token = auth_service.create_access_token(subject=str(user.id))
