@@ -1,0 +1,17 @@
+# Prevent service account key from being committed
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+dist/
+build/
+
+# Env
+.env
+
+# Secrets (important)
+client_secret*.json
+*.key.json
