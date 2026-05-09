@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
 import {
+  attachmentContentUrl,
   createThread,
   getMessagesByThread,
   getThreads,
@@ -9,14 +10,32 @@ import {
   removeThread,
   renameThread,
   sendMessage,
+  uploadAttachment,
 } from "../lib/api";
 
-import type { ChatHistoryItem, ThreadItem } from "../types";
+import type { AttachmentItem, ChatHistoryItem, ThreadItem } from "../types";
 
 interface Message {
   id: string;
   text: string;
   sender: "user" | "bot";
+  attachments?: AttachmentItem[];
+}
+
+interface PendingAttachment {
+  localId: string;
+  localFile?: File;
+  original_filename: string;
+  mime_type: string;
+  file_type: AttachmentItem["file_type"] | null;
+  id?: number;
+  thread_id?: number;
+  user_id?: number;
+  created_at?: string;
+  uploadProgress: number;
+  uploading: boolean;
+  error?: string;
+  localPreviewUrl?: string;
 }
 
 export function Chat() {
@@ -27,6 +46,9 @@ export function Chat() {
   const [loadingThreads, setLoadingThreads] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
+  const [preparingUpload, setPreparingUpload] = useState(false);
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -106,7 +128,30 @@ export function Chat() {
   };
 
   const handleSend = async () => {
-    if (!input.trim()) return;
+    const hasText = Boolean(input.trim());
+    const uploading = pendingAttachments.some((item) => item.uploading);
+    const hasUploadErrors = pendingAttachments.some((item) => Boolean(item.error));
+    const readyAttachments = pendingAttachments.filter(
+      (item): item is PendingAttachment & { id: number } =>
+        typeof item.id === "number" && !item.uploading,
+    );
+    const unresolvedAttachments = pendingAttachments.filter(
+      (item) => !item.uploading && !item.error && typeof item.id !== "number",
+    );
+
+    if ((!hasText && readyAttachments.length === 0) || uploading || hasUploadErrors) {
+      return;
+    }
+
+    if (unresolvedAttachments.length > 0) {
+      const warnMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        text: "Attachment upload is not finished yet. Please wait a moment and try again.",
+        sender: "bot",
+      };
+      setMessages((prev) => [...prev, warnMessage]);
+      return;
+    }
 
     let threadId = selectedThreadId;
     if (!threadId) {
@@ -116,11 +161,22 @@ export function Chat() {
       threadId = created.id;
     }
 
-    const content = input;
+    const content = input.trim();
+    const messageAttachments: AttachmentItem[] = readyAttachments.map((item) => ({
+        id: item.id,
+        user_id: item.user_id ?? 0,
+        thread_id: item.thread_id ?? threadId,
+        original_filename: item.original_filename,
+        mime_type: item.mime_type,
+        file_type: item.file_type ?? "document",
+        created_at: item.created_at ?? new Date().toISOString(),
+      }));
+
     const userMessage: Message = {
       id: Date.now().toString(),
-      text: content,
+      text: content || "(attachment)",
       sender: "user",
+      attachments: messageAttachments,
     };
 
     setMessages((prev) => [...prev, userMessage]);
@@ -128,13 +184,19 @@ export function Chat() {
     setSending(true);
 
     try {
-      const response = await sendMessage(content, threadId);
+      const attachmentIds = readyAttachments.map((item) => item.id);
+      const response = await sendMessage(
+        content || "Please process the uploaded attachment(s).",
+        threadId,
+        attachmentIds,
+      );
       const botMessage: Message = {
         id: (Date.now() + 1).toString(),
         text: response.reply,
         sender: "bot",
       };
       setMessages((prev) => [...prev, botMessage]);
+      setPendingAttachments([]);
 
       const updatedThreads = await getThreads();
       setThreads(updatedThreads);
@@ -147,6 +209,170 @@ export function Chat() {
       setMessages((prev) => [...prev, errorMessage]);
     } finally {
       setSending(false);
+    }
+  };
+
+  const ensureThreadForAttachment = async (): Promise<number> => {
+    if (selectedThreadId) {
+      return selectedThreadId;
+    }
+
+    const created = await createThread();
+    setThreads((prev) => [created, ...prev]);
+    setSelectedThreadId(created.id);
+    return created.id;
+  };
+
+  const handleSelectAttachments = async (files: FileList | null) => {
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    const filesToUpload = Array.from(files).map((file) => {
+      const localId = `${Date.now()}-${Math.random()}`;
+      const previewUrl = file.type.startsWith("image/") || file.type.startsWith("video/")
+        ? URL.createObjectURL(file)
+        : undefined;
+      return {
+        file,
+        localId,
+        pending: {
+          localId,
+          localFile: file,
+          original_filename: file.name,
+          mime_type: file.type || "application/octet-stream",
+          file_type: null,
+          uploadProgress: 0,
+          uploading: true,
+          localPreviewUrl: previewUrl,
+        } satisfies PendingAttachment,
+      };
+    });
+
+    setPendingAttachments((prev) => [...prev, ...filesToUpload.map((item) => item.pending)]);
+
+    let threadId: number;
+    setPreparingUpload(true);
+    try {
+      threadId = await ensureThreadForAttachment();
+    } finally {
+      setPreparingUpload(false);
+    }
+
+    for (const itemToUpload of filesToUpload) {
+      try {
+        const uploaded = await uploadAttachment(itemToUpload.file, threadId, (progress) => {
+          setPendingAttachments((prev) =>
+            prev.map((item) =>
+              item.localId === itemToUpload.localId ? { ...item, uploadProgress: progress } : item,
+            ),
+          );
+        });
+
+        setPendingAttachments((prev) =>
+          prev.map((item) =>
+            item.localId === itemToUpload.localId
+              ? {
+                  ...item,
+                  id: uploaded.id,
+                  user_id: uploaded.user_id,
+                  thread_id: uploaded.thread_id,
+                  file_type: uploaded.file_type,
+                  created_at: uploaded.created_at,
+                  uploadProgress: 100,
+                  uploading: false,
+                }
+              : item,
+          ),
+        );
+      } catch (error) {
+        setPendingAttachments((prev) =>
+          prev.map((item) =>
+            item.localId === itemToUpload.localId
+              ? {
+                  ...item,
+                  uploading: false,
+                  error: error instanceof Error ? error.message : "Upload failed",
+                }
+              : item,
+          ),
+        );
+      }
+    }
+  };
+
+  const removePendingAttachment = (localId: string) => {
+    setPendingAttachments((prev) => {
+      const next = prev.filter((item) => item.localId !== localId);
+      const removed = prev.find((item) => item.localId === localId);
+      if (removed?.localPreviewUrl) {
+        URL.revokeObjectURL(removed.localPreviewUrl);
+      }
+      return next;
+    });
+  };
+
+  const retryPendingAttachment = async (localId: string) => {
+    const target = pendingAttachments.find((item) => item.localId === localId);
+    if (!target?.localFile) {
+      setPendingAttachments((prev) =>
+        prev.map((item) =>
+          item.localId === localId
+            ? { ...item, error: "Retry unavailable. Please attach the file again." }
+            : item,
+        ),
+      );
+      return;
+    }
+
+    const threadId = target.thread_id ?? (await ensureThreadForAttachment());
+
+    setPendingAttachments((prev) =>
+      prev.map((item) =>
+        item.localId === localId
+          ? { ...item, uploading: true, uploadProgress: 0, error: undefined, thread_id: threadId }
+          : item,
+      ),
+    );
+
+    try {
+      const uploaded = await uploadAttachment(target.localFile, threadId, (progress) => {
+        setPendingAttachments((prev) =>
+          prev.map((item) =>
+            item.localId === localId ? { ...item, uploadProgress: progress } : item,
+          ),
+        );
+      });
+
+      setPendingAttachments((prev) =>
+        prev.map((item) =>
+          item.localId === localId
+            ? {
+                ...item,
+                id: uploaded.id,
+                user_id: uploaded.user_id,
+                thread_id: uploaded.thread_id,
+                file_type: uploaded.file_type,
+                created_at: uploaded.created_at,
+                uploadProgress: 100,
+                uploading: false,
+                error: undefined,
+              }
+            : item,
+        ),
+      );
+    } catch (error) {
+      setPendingAttachments((prev) =>
+        prev.map((item) =>
+          item.localId === localId
+            ? {
+                ...item,
+                uploading: false,
+                error: error instanceof Error ? error.message : "Upload failed",
+              }
+            : item,
+        ),
+      );
     }
   };
 
@@ -270,7 +496,16 @@ export function Chat() {
                       }`}
                     >
                       {msg.sender === "user" ? (
-                        <span className="whitespace-pre-wrap">{msg.text}</span>
+                        <div className="space-y-2">
+                          <span className="whitespace-pre-wrap">{msg.text}</span>
+                          {msg.attachments && msg.attachments.length > 0 && (
+                            <div className="space-y-2">
+                              {msg.attachments.map((attachment) => (
+                                <AttachmentPreview key={attachment.id} attachment={attachment} compact />
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       ) : (
                         <div className="prose prose-sm max-w-none
                           prose-p:my-1 prose-p:leading-relaxed
@@ -301,7 +536,75 @@ export function Chat() {
             </div>
 
             <div className="border-t border-slate-200/70 bg-white/95 p-3 backdrop-blur">
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                accept="image/*,video/*,.csv,.xls,.xlsx,.txt,.md,.json,.py,.js,.ts,.tsx,.jsx,.java,.c,.cpp,.cs,.go,.rs,.sql,.pdf,.doc,.docx,.tex"
+                onChange={(e) => {
+                  void handleSelectAttachments(e.target.files);
+                  e.currentTarget.value = "";
+                }}
+              />
+
+              {pendingAttachments.length > 0 && (
+                <div className="mx-auto mb-2 w-full max-w-2xl space-y-2">
+                  {pendingAttachments.map((item) => (
+                    <div
+                      key={item.localId}
+                      className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-medium text-slate-700">{item.original_filename}</p>
+                        <p className="text-[11px] text-slate-500">
+                          {item.uploading
+                            ? `Uploading ${item.uploadProgress}%`
+                            : item.error
+                              ? item.error
+                              : "Uploaded"}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {item.error && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void retryPendingAttachment(item.localId);
+                            }}
+                            className="rounded-md bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800 hover:bg-amber-200"
+                          >
+                            Retry
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => removePendingAttachment(item.localId)}
+                          className="rounded-md px-2 py-1 text-xs text-slate-600 hover:bg-slate-200"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {pendingAttachments.some((item) => Boolean(item.error)) && (
+                <div className="mx-auto mb-2 w-full max-w-2xl rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  One or more attachments failed to upload. Remove failed files and try attaching again.
+                </div>
+              )}
+
               <div className="mx-auto flex w-full max-w-2xl items-end gap-2 rounded-full border border-slate-200 bg-white p-1.5 shadow-sm">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={sending || loadingMessages || preparingUpload}
+                  className="h-10 rounded-full border border-slate-200 px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Attach
+                </button>
                 <textarea
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
@@ -314,12 +617,31 @@ export function Chat() {
                   onClick={() => {
                     void handleSend();
                   }}
-                  disabled={sending || loadingMessages || !input.trim()}
+                  disabled={
+                    sending
+                    || loadingMessages
+                    || preparingUpload
+                    || pendingAttachments.some((item) => item.uploading)
+                    || pendingAttachments.some((item) => Boolean(item.error))
+                    || (!input.trim() && pendingAttachments.filter((item) => typeof item.id === "number").length === 0)
+                  }
                   className="h-10 rounded-full bg-blue-600 px-5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {sending ? "Sending..." : "Send"}
+                  {sending
+                    ? "Sending..."
+                    : preparingUpload || pendingAttachments.some((item) => item.uploading)
+                      ? "Uploading..."
+                      : "Send"}
                 </button>
               </div>
+
+              {(preparingUpload || pendingAttachments.some((item) => item.uploading)) && (
+                <div className="mx-auto mt-2 w-full max-w-2xl px-2 text-xs font-medium text-blue-700">
+                  {preparingUpload
+                    ? "Preparing upload..."
+                    : `Uploading ${pendingAttachments.filter((item) => item.uploading).length} file(s)...`}
+                </div>
+              )}
             </div>
           </section>
         </div>
@@ -336,6 +658,7 @@ function mapHistoryToMessages(history: ChatHistoryItem[]): Message[] {
       id: `u-${item.id}`,
       text: item.message,
       sender: "user",
+      attachments: item.attachments ?? [],
     });
     mapped.push({
       id: `b-${item.id}`,
@@ -345,4 +668,45 @@ function mapHistoryToMessages(history: ChatHistoryItem[]): Message[] {
   }
 
   return mapped;
+}
+
+function AttachmentPreview({
+  attachment,
+  compact = false,
+}: {
+  attachment: AttachmentItem;
+  compact?: boolean;
+}) {
+  const source = attachmentContentUrl(attachment.id);
+
+  if (attachment.file_type === "image") {
+    return (
+      <img
+        src={source}
+        alt={attachment.original_filename}
+        className={`rounded-lg border border-white/30 object-cover ${compact ? "max-h-44" : "max-h-56"}`}
+      />
+    );
+  }
+
+  if (attachment.file_type === "video") {
+    return (
+      <video
+        src={source}
+        controls
+        className={`rounded-lg border border-white/30 ${compact ? "max-h-44" : "max-h-56"}`}
+      />
+    );
+  }
+
+  return (
+    <a
+      href={source}
+      target="_blank"
+      rel="noreferrer"
+      className="inline-flex rounded-lg bg-white/20 px-2 py-1 text-xs font-medium text-inherit underline"
+    >
+      {attachment.original_filename}
+    </a>
+  );
 }

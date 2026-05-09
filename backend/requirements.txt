@@ -14,3 +14,7 @@ chromadb
 litellm
 httpx
 langchain
+python-multipart
+openpyxl
+pypdf
+python-docx

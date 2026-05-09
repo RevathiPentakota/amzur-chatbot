@@ -2,6 +2,7 @@ export const API_BASE_URL = "http://localhost:8000";
 const REQUEST_TIMEOUT_MS = 60000;
 
 import type {
+  AttachmentItem,
   AuthPayload,
   AuthResponse,
   ChatHistoryItem,
@@ -15,11 +16,17 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
+  const headers = new Headers(init?.headers ?? {});
+  const isFormData = init?.body instanceof FormData;
+  if (!isFormData && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
   let res: Response;
   try {
     res = await fetch(`${API_BASE_URL}${path}`, {
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers,
       signal: controller.signal,
       ...init,
     });
@@ -79,10 +86,63 @@ export async function getMessagesByThread(threadId: number): Promise<ChatHistory
   });
 }
 
-export async function sendMessage(message: string, threadId: number): Promise<ChatResponse> {
+export async function sendMessage(
+  message: string,
+  threadId: number,
+  attachmentIds: number[] = [],
+): Promise<ChatResponse> {
   return api<ChatResponse>("/chat", {
     method: "POST",
-    body: JSON.stringify({ message, thread_id: threadId }),
+    body: JSON.stringify({ message, thread_id: threadId, attachment_ids: attachmentIds }),
+  });
+}
+
+export function attachmentContentUrl(attachmentId: number): string {
+  return `${API_BASE_URL}/chat/attachments/${attachmentId}/content`;
+}
+
+export function uploadAttachment(
+  file: File,
+  threadId: number,
+  onProgress?: (progress: number) => void,
+): Promise<AttachmentItem> {
+  return new Promise((resolve, reject) => {
+    const formData = new FormData();
+    formData.append("thread_id", String(threadId));
+    formData.append("file", file);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${API_BASE_URL}/chat/upload`, true);
+    xhr.withCredentials = true;
+
+    xhr.upload.onprogress = (event) => {
+      if (!onProgress || !event.lengthComputable) {
+        return;
+      }
+      const percent = Math.round((event.loaded / event.total) * 100);
+      onProgress(percent);
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText) as AttachmentItem);
+        } catch {
+          reject(new Error("Failed to parse upload response"));
+        }
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(xhr.responseText) as { detail?: string };
+        reject(new Error(parsed.detail ?? `Upload failed (${xhr.status})`));
+      } catch {
+        reject(new Error(`Upload failed (${xhr.status})`));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error("Upload request failed"));
+    xhr.send(formData);
   });
 }
 

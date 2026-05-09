@@ -16,6 +16,7 @@ export interface UserInfo {
 export interface ChatRequest {
 	message: string;
 	thread_id: number;
+	attachment_ids?: number[];
 }
 
 export interface ChatResponse {
@@ -28,6 +29,17 @@ export interface ChatHistoryItem {
 	thread_id: number;
 	message: string;
 	response: string;
+	created_at: string;
+	attachments?: AttachmentItem[];
+}
+
+export interface AttachmentItem {
+	id: number;
+	user_id: number;
+	thread_id: number;
+	original_filename: string;
+	mime_type: string;
+	file_type: "image" | "video" | "table" | "code" | "document";
 	created_at: string;
 }
 
