@@ -71,3 +71,21 @@ export interface ImageGenerateResponse {
 	thread_id: number | null;
 	created_at: string;
 }
+
+export interface RagPdfItem {
+	id: number;
+	user_id: number;
+	thread_id: number;
+	filename: string;
+	created_at: string;
+}
+
+export interface RagChatRequest {
+	thread_id: number;
+	question: string;
+}
+
+export interface RagChatResponse {
+	answer: string;
+	thread_id: number;
+}

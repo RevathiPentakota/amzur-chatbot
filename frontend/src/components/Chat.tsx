@@ -7,15 +7,19 @@ import {
   generateImage,
   generatedImageUrl,
   getMessagesByThread,
+  listThreadRagPdfs,
+  ragChat,
+  ragPdfContentUrl,
   getThreads,
   logoutUser,
   removeThread,
   renameThread,
   sendMessage,
+  uploadRagPdf,
   uploadAttachment,
 } from "../lib/api";
 
-import type { AttachmentItem, ChatHistoryItem, ThreadItem } from "../types";
+import type { AttachmentItem, ChatHistoryItem, RagPdfItem, ThreadItem } from "../types";
 
 interface Message {
   id: string;
@@ -55,7 +59,12 @@ export function Chat() {
   const [showImagePrompt, setShowImagePrompt] = useState(false);
   const [imagePrompt, setImagePrompt] = useState("");
   const [generatingImage, setGeneratingImage] = useState(false);
+  const [ragPdfs, setRagPdfs] = useState<RagPdfItem[]>([]);
+  const [ragUploading, setRagUploading] = useState(false);
+  const [ragUploadProgress, setRagUploadProgress] = useState(0);
+  const [usePdfRag, setUsePdfRag] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const pdfInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -84,8 +93,13 @@ export function Chat() {
       try {
         const history = await getMessagesByThread(selectedThreadId);
         setMessages(mapHistoryToMessages(history));
+        const pdfs = await listThreadRagPdfs(selectedThreadId);
+        setRagPdfs(pdfs);
+        setUsePdfRag(pdfs.length > 0);
       } catch {
         setMessages([]);
+        setRagPdfs([]);
+        setUsePdfRag(false);
       } finally {
         setLoadingMessages(false);
       }
@@ -191,18 +205,29 @@ export function Chat() {
     setSending(true);
 
     try {
-      const attachmentIds = readyAttachments.map((item) => item.id);
-      const response = await sendMessage(
-        content || "Please process the uploaded attachment(s).",
-        threadId,
-        attachmentIds,
-      );
-      const botMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: response.reply,
-        sender: "bot",
-      };
-      setMessages((prev) => [...prev, botMessage]);
+      const useRagPath = usePdfRag && ragPdfs.length > 0 && readyAttachments.length === 0 && Boolean(content);
+      if (useRagPath) {
+        const response = await ragChat({ thread_id: threadId, question: content });
+        const botMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          text: response.answer,
+          sender: "bot",
+        };
+        setMessages((prev) => [...prev, botMessage]);
+      } else {
+        const attachmentIds = readyAttachments.map((item) => item.id);
+        const response = await sendMessage(
+          content || "Please process the uploaded attachment(s).",
+          threadId,
+          attachmentIds,
+        );
+        const botMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          text: response.reply,
+          sender: "bot",
+        };
+        setMessages((prev) => [...prev, botMessage]);
+      }
       setPendingAttachments([]);
 
       const updatedThreads = await getThreads();
@@ -445,6 +470,61 @@ export function Chat() {
     }
   };
 
+  const handleSelectRagPdf = async (files: FileList | null) => {
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    const file = files[0];
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: (Date.now() + 1).toString(),
+          text: "Only PDF files are supported for RAG upload.",
+          sender: "bot",
+        },
+      ]);
+      return;
+    }
+
+    let threadId = selectedThreadId;
+    if (!threadId) {
+      const created = await createThread();
+      setThreads((prev) => [created, ...prev]);
+      setSelectedThreadId(created.id);
+      threadId = created.id;
+    }
+
+    setRagUploading(true);
+    setRagUploadProgress(0);
+    try {
+      const uploaded = await uploadRagPdf(file, threadId, (progress) => setRagUploadProgress(progress));
+      setRagPdfs((prev) => [...prev, uploaded]);
+      setUsePdfRag(true);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          text: `PDF uploaded and indexed: ${uploaded.filename}. Ask your questions in PDF mode.`,
+          sender: "bot",
+        },
+      ]);
+    } catch (error) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: (Date.now() + 1).toString(),
+          text: error instanceof Error ? error.message : "PDF upload failed.",
+          sender: "bot",
+        },
+      ]);
+    } finally {
+      setRagUploading(false);
+      setRagUploadProgress(0);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-100/80 p-4">
       <div className="mx-auto h-[88vh] w-full max-w-6xl overflow-hidden rounded-2xl border border-slate-200/70 bg-white shadow-xl">
@@ -618,6 +698,35 @@ export function Chat() {
                   e.currentTarget.value = "";
                 }}
               />
+              <input
+                ref={pdfInputRef}
+                type="file"
+                className="hidden"
+                accept="application/pdf,.pdf"
+                onChange={(e) => {
+                  void handleSelectRagPdf(e.target.files);
+                  e.currentTarget.value = "";
+                }}
+              />
+
+              {ragPdfs.length > 0 && (
+                <div className="mx-auto mb-2 w-full max-w-2xl rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2">
+                  <p className="mb-1 text-xs font-semibold text-indigo-700">PDFs in this thread</p>
+                  <div className="flex flex-wrap gap-2">
+                    {ragPdfs.map((pdf) => (
+                      <a
+                        key={pdf.id}
+                        href={ragPdfContentUrl(pdf.id)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-md bg-white px-2 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-100"
+                      >
+                        {pdf.filename}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {pendingAttachments.length > 0 && (
                 <div className="mx-auto mb-2 w-full max-w-2xl space-y-2">
@@ -671,10 +780,19 @@ export function Chat() {
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={sending || loadingMessages || preparingUpload || generatingImage}
+                  disabled={sending || loadingMessages || preparingUpload || generatingImage || ragUploading}
                   className="h-10 rounded-full border border-slate-200 px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Attach
+                </button>
+                <button
+                  type="button"
+                  onClick={() => pdfInputRef.current?.click()}
+                  disabled={sending || loadingMessages || ragUploading || generatingImage}
+                  title="Upload PDF for RAG"
+                  className="h-10 rounded-full border border-indigo-200 px-3 text-sm font-medium text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  PDF
                 </button>
                 <button
                   type="button"
@@ -702,6 +820,7 @@ export function Chat() {
                     || loadingMessages
                     || preparingUpload
                     || generatingImage
+                    || ragUploading
                     || pendingAttachments.some((item) => item.uploading)
                     || pendingAttachments.some((item) => Boolean(item.error))
                     || (!input.trim() && pendingAttachments.filter((item) => typeof item.id === "number").length === 0)
@@ -715,6 +834,19 @@ export function Chat() {
                       : "Send"}
                 </button>
               </div>
+
+              {ragPdfs.length > 0 && (
+                <div className="mx-auto mt-2 flex w-full max-w-2xl items-center justify-between px-2 text-xs">
+                  <span className="font-medium text-indigo-700">PDF QA mode</span>
+                  <button
+                    type="button"
+                    onClick={() => setUsePdfRag((v) => !v)}
+                    className={`rounded-full px-2 py-1 font-medium ${usePdfRag ? "bg-indigo-600 text-white" : "bg-slate-200 text-slate-700"}`}
+                  >
+                    {usePdfRag ? "On" : "Off"}
+                  </button>
+                </div>
+              )}
 
               {showImagePrompt && (
                 <div className="mx-auto mt-2 w-full max-w-2xl rounded-2xl border border-purple-200 bg-purple-50 p-3 shadow-sm">
@@ -756,6 +888,12 @@ export function Chat() {
                   {preparingUpload
                     ? "Preparing upload..."
                     : `Uploading ${pendingAttachments.filter((item) => item.uploading).length} file(s)...`}
+                </div>
+              )}
+
+              {ragUploading && (
+                <div className="mx-auto mt-2 w-full max-w-2xl px-2 text-xs font-medium text-indigo-700">
+                  Processing PDF for RAG... {ragUploadProgress}%
                 </div>
               )}
             </div>

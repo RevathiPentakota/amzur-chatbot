@@ -14,6 +14,8 @@ chromadb
 litellm
 httpx
 langchain
+langchain-community
+langchain-openai
 python-multipart
 openpyxl
 pypdf

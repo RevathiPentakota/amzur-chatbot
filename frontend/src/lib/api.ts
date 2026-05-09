@@ -8,6 +8,9 @@ import type {
   ChatHistoryItem,
   ImageGenerateRequest,
   ImageGenerateResponse,
+  RagChatRequest,
+  RagChatResponse,
+  RagPdfItem,
   ThreadCreatePayload,
   ThreadItem,
   ThreadUpdatePayload,
@@ -190,4 +193,66 @@ export async function generateImage(
 
 export function generatedImageUrl(imageId: number): string {
   return `${API_BASE_URL}/images/${imageId}/content`;
+}
+
+export function ragPdfContentUrl(pdfId: number): string {
+  return `${API_BASE_URL}/rag/pdfs/${pdfId}/content`;
+}
+
+export async function listThreadRagPdfs(threadId: number): Promise<RagPdfItem[]> {
+  return api<RagPdfItem[]>(`/rag/thread/${threadId}/pdfs`, {
+    method: "GET",
+  });
+}
+
+export async function ragChat(payload: RagChatRequest): Promise<RagChatResponse> {
+  return api<RagChatResponse>("/rag/chat", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function uploadRagPdf(
+  file: File,
+  threadId: number,
+  onProgress?: (progress: number) => void,
+): Promise<RagPdfItem> {
+  return new Promise((resolve, reject) => {
+    const formData = new FormData();
+    formData.append("thread_id", String(threadId));
+    formData.append("file", file);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${API_BASE_URL}/rag/upload-pdf`, true);
+    xhr.withCredentials = true;
+
+    xhr.upload.onprogress = (event) => {
+      if (!onProgress || !event.lengthComputable) {
+        return;
+      }
+      const percent = Math.round((event.loaded / event.total) * 100);
+      onProgress(percent);
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText) as RagPdfItem);
+        } catch {
+          reject(new Error("Failed to parse PDF upload response"));
+        }
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(xhr.responseText) as { detail?: string };
+        reject(new Error(parsed.detail ?? `PDF upload failed (${xhr.status})`));
+      } catch {
+        reject(new Error(`PDF upload failed (${xhr.status})`));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error("PDF upload request failed"));
+    xhr.send(formData);
+  });
 }

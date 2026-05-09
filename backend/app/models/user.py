@@ -21,3 +21,4 @@ class User(Base):
     messages = relationship("ChatMessage", back_populates="user", cascade="all, delete-orphan")
     attachments = relationship("Attachment", back_populates="user", cascade="all, delete-orphan")
     generated_images = relationship("GeneratedImage", back_populates="user", cascade="all, delete-orphan")
+    pdf_documents = relationship("PdfDocument", back_populates="user", cascade="all, delete-orphan")

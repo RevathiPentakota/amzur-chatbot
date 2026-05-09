@@ -19,8 +19,10 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "gpt-4o"
     VISION_MODEL: str = "gpt-4o"
     IMAGE_GEN_MODEL: str = "gemini/imagen-4.0-fast-generate-001"
+    LITELLM_EMBEDDING_MODEL: str = "text-embedding-3-large"
     LLM_TIMEOUT_SECONDS: int = 120
     UPLOAD_DIR: str = "./uploads"
+    CHROMA_PERSIST_DIR: str = "./chroma_db"
     MAX_UPLOAD_MB: int = 25
     SECRET_KEY: str = ""
     ALGORITHM: str = "HS256"
