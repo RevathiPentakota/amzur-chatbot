@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     LITELLM_PROXY_URL: str = ""
     LITELLM_API_KEY: str = ""
     LLM_MODEL: str = "gpt-4o"
+    LLM_TIMEOUT_SECONDS: int = 30
     SECRET_KEY: str = ""
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60

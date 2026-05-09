@@ -1,4 +1,5 @@
 export const API_BASE_URL = "http://localhost:8000";
+const REQUEST_TIMEOUT_MS = 60000;
 
 import type {
   AuthPayload,
@@ -11,11 +12,26 @@ import type {
 } from "../types";
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    ...init,
-  });
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}${path}`, {
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      ...init,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("Request timed out. Please try again.");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+
   if (!res.ok) {
     let detail = `${res.status} ${res.statusText}`;
     try {

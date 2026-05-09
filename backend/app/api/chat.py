@@ -21,6 +21,8 @@ async def chat(
         reply = await chat_service.chat(db, current_user, request.message, request.thread_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     return ChatResponse(reply=reply, thread_id=request.thread_id)
 
 

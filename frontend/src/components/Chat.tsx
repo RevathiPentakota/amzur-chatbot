@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import ReactMarkdown from "react-markdown";
 
 import {
   createThread,
@@ -237,15 +238,15 @@ export function Chat() {
             </button>
           </aside>
 
-          <section className="col-span-12 flex h-full flex-col md:col-span-8">
+          <section className="col-span-12 flex h-full min-h-0 flex-col md:col-span-8">
             <div className="border-b border-slate-200/70 bg-white px-4 py-3">
               <h1 className="truncate text-xs font-semibold tracking-wide text-slate-700">
                 {selectedThread?.title ?? "amzur chatbot"}
               </h1>
             </div>
 
-            <div className="flex-1 overflow-y-auto bg-slate-50/70 px-4 py-4">
-              <div className="mx-auto w-full max-w-2xl space-y-3">
+            <div className="flex-1 min-h-0 overflow-y-auto bg-slate-50/70 px-4 py-4">
+              <div className="mx-auto w-full max-w-2xl space-y-3 pb-2">
                 {loadingMessages && <p className="text-sm text-slate-500">Loading messages...</p>}
 
                 {!loadingMessages && selectedThreadId === null && (
@@ -262,13 +263,29 @@ export function Chat() {
                     className={`flex ${msg.sender === "user" ? "justify-end" : "justify-start"}`}
                   >
                     <div
-                      className={`max-w-[80%] rounded-xl px-4 py-2 text-sm shadow-sm whitespace-pre-wrap wrap-break-word ${
+                      className={`max-w-[80%] min-w-0 overflow-hidden wrap-break-word rounded-xl px-4 py-2 text-sm shadow-sm ${
                         msg.sender === "user"
                           ? "bg-blue-600 text-white"
                           : "bg-gray-200 text-slate-800"
                       }`}
                     >
-                      {msg.text}
+                      {msg.sender === "user" ? (
+                        <span className="whitespace-pre-wrap">{msg.text}</span>
+                      ) : (
+                        <div className="prose prose-sm max-w-none
+                          prose-p:my-1 prose-p:leading-relaxed
+                          prose-ul:my-1 prose-ul:pl-4
+                          prose-ol:my-1 prose-ol:pl-4
+                          prose-li:my-0.5
+                          prose-strong:font-semibold
+                          prose-code:rounded prose-code:bg-slate-300 prose-code:px-1 prose-code:text-xs
+                          prose-pre:my-2 prose-pre:overflow-x-auto prose-pre:rounded-lg prose-pre:bg-slate-700 prose-pre:p-3 prose-pre:text-xs prose-pre:text-slate-100
+                          prose-headings:my-1 prose-headings:font-semibold
+                          prose-blockquote:border-l-2 prose-blockquote:border-slate-400 prose-blockquote:pl-3 prose-blockquote:italic
+                        ">
+                          <ReactMarkdown>{msg.text}</ReactMarkdown>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -283,7 +300,7 @@ export function Chat() {
               </div>
             </div>
 
-            <div className="sticky bottom-0 border-t border-slate-200/70 bg-white/95 p-3 backdrop-blur">
+            <div className="border-t border-slate-200/70 bg-white/95 p-3 backdrop-blur">
               <div className="mx-auto flex w-full max-w-2xl items-end gap-2 rounded-full border border-slate-200 bg-white p-1.5 shadow-sm">
                 <textarea
                   value={input}
