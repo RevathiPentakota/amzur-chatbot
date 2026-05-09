@@ -25,3 +25,4 @@ class Thread(Base):
     user = relationship("User", back_populates="threads")
     messages = relationship("ChatMessage", back_populates="thread", cascade="all, delete-orphan")
     attachments = relationship("Attachment", back_populates="thread", cascade="all, delete-orphan")
+    generated_images = relationship("GeneratedImage", back_populates="thread", cascade="all, delete-orphan")

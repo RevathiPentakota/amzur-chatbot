@@ -18,7 +18,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def init_db() -> None:
-    from app.models import attachment, chat_message, thread, user  # noqa: F401
+    from app.models import attachment, chat_message, generated_image, thread, user  # noqa: F401
 
     async with engine.begin() as conn:
         for table in Base.metadata.sorted_tables:

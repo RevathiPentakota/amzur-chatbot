@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import auth, chat, threads
+from app.api import auth, chat, images, threads
 from app.db.session import init_db
 
 app = FastAPI(title="amzur-chatbot")
@@ -27,6 +27,7 @@ app.include_router(chat.router)
 app.include_router(auth.router)
 app.include_router(auth.router, prefix="/api")
 app.include_router(threads.router)
+app.include_router(images.router)
 
 
 @app.on_event("startup")

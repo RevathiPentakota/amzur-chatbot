@@ -4,6 +4,8 @@ import ReactMarkdown from "react-markdown";
 import {
   attachmentContentUrl,
   createThread,
+  generateImage,
+  generatedImageUrl,
   getMessagesByThread,
   getThreads,
   logoutUser,
@@ -20,6 +22,8 @@ interface Message {
   text: string;
   sender: "user" | "bot";
   attachments?: AttachmentItem[];
+  generatedImageId?: number;
+  generatedImagePrompt?: string;
 }
 
 interface PendingAttachment {
@@ -48,6 +52,9 @@ export function Chat() {
   const [sending, setSending] = useState(false);
   const [preparingUpload, setPreparingUpload] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [showImagePrompt, setShowImagePrompt] = useState(false);
+  const [imagePrompt, setImagePrompt] = useState("");
+  const [generatingImage, setGeneratingImage] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -391,6 +398,53 @@ export function Chat() {
     }
   };
 
+  const handleGenerateImage = async () => {
+    if (!imagePrompt.trim() || generatingImage) return;
+
+    let threadId = selectedThreadId;
+    if (!threadId) {
+      const created = await createThread();
+      setThreads((prev) => [created, ...prev]);
+      setSelectedThreadId(created.id);
+      threadId = created.id;
+    }
+
+    const prompt = imagePrompt.trim();
+    setImagePrompt("");
+    setShowImagePrompt(false);
+    setGeneratingImage(true);
+
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      text: `Generate image: ${prompt}`,
+      sender: "user",
+    };
+    setMessages((prev) => [...prev, userMsg]);
+
+    try {
+      const result = await generateImage({ prompt, thread_id: threadId });
+      const botMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        text: "",
+        sender: "bot",
+        generatedImageId: result.id,
+        generatedImagePrompt: result.prompt,
+      };
+      setMessages((prev) => [...prev, botMsg]);
+      const updatedThreads = await getThreads();
+      setThreads(updatedThreads);
+    } catch (error) {
+      const errMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        text: error instanceof Error ? error.message : "Image generation failed.",
+        sender: "bot",
+      };
+      setMessages((prev) => [...prev, errMsg]);
+    } finally {
+      setGeneratingImage(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-100/80 p-4">
       <div className="mx-auto h-[88vh] w-full max-w-6xl overflow-hidden rounded-2xl border border-slate-200/70 bg-white shadow-xl">
@@ -506,6 +560,15 @@ export function Chat() {
                             </div>
                           )}
                         </div>
+                      ) : msg.generatedImageId ? (
+                        <div className="space-y-2">
+                          <p className="text-xs text-slate-500 italic">Generated: {msg.generatedImagePrompt}</p>
+                          <img
+                            src={generatedImageUrl(msg.generatedImageId)}
+                            alt={msg.generatedImagePrompt}
+                            className="max-h-80 rounded-lg border border-slate-300 object-contain"
+                          />
+                        </div>
                       ) : (
                         <div className="prose prose-sm max-w-none
                           prose-p:my-1 prose-p:leading-relaxed
@@ -529,6 +592,14 @@ export function Chat() {
                   <div className="flex justify-start">
                     <div className="max-w-[80%] rounded-xl bg-gray-200 px-4 py-2 text-sm italic text-slate-600 shadow-sm">
                       thinking...
+                    </div>
+                  </div>
+                )}
+
+                {generatingImage && (
+                  <div className="flex justify-start">
+                    <div className="max-w-[80%] rounded-xl bg-gray-200 px-4 py-2 text-sm italic text-slate-600 shadow-sm">
+                      Generating image...
                     </div>
                   </div>
                 )}
@@ -600,10 +671,19 @@ export function Chat() {
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={sending || loadingMessages || preparingUpload}
+                  disabled={sending || loadingMessages || preparingUpload || generatingImage}
                   className="h-10 rounded-full border border-slate-200 px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Attach
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowImagePrompt((v) => !v)}
+                  disabled={sending || loadingMessages || generatingImage}
+                  title="Generate image with AI"
+                  className="h-10 rounded-full border border-slate-200 px-3 text-sm font-medium text-slate-700 transition hover:bg-purple-50 hover:border-purple-300 hover:text-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  🖼
                 </button>
                 <textarea
                   value={input}
@@ -621,6 +701,7 @@ export function Chat() {
                     sending
                     || loadingMessages
                     || preparingUpload
+                    || generatingImage
                     || pendingAttachments.some((item) => item.uploading)
                     || pendingAttachments.some((item) => Boolean(item.error))
                     || (!input.trim() && pendingAttachments.filter((item) => typeof item.id === "number").length === 0)
@@ -634,6 +715,41 @@ export function Chat() {
                       : "Send"}
                 </button>
               </div>
+
+              {showImagePrompt && (
+                <div className="mx-auto mt-2 w-full max-w-2xl rounded-2xl border border-purple-200 bg-purple-50 p-3 shadow-sm">
+                  <p className="mb-2 text-xs font-semibold text-purple-700">Describe the image you want to generate</p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={imagePrompt}
+                      onChange={(e) => setImagePrompt(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void handleGenerateImage();
+                        if (e.key === "Escape") setShowImagePrompt(false);
+                      }}
+                      placeholder="e.g. A sunset over mountain peaks..."
+                      autoFocus
+                      className="flex-1 rounded-xl border border-purple-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-purple-400"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void handleGenerateImage()}
+                      disabled={!imagePrompt.trim() || generatingImage}
+                      className="rounded-xl bg-purple-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {generatingImage ? "Generating..." : "Generate"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowImagePrompt(false)}
+                      className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-100"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {(preparingUpload || pendingAttachments.some((item) => item.uploading)) && (
                 <div className="mx-auto mt-2 w-full max-w-2xl px-2 text-xs font-medium text-blue-700">

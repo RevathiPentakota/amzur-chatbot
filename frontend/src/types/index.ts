@@ -58,3 +58,16 @@ export interface ThreadCreatePayload {
 export interface ThreadUpdatePayload {
 	title: string;
 }
+
+export interface ImageGenerateRequest {
+	prompt: string;
+	thread_id?: number;
+}
+
+export interface ImageGenerateResponse {
+	id: number;
+	image_url: string;
+	prompt: string;
+	thread_id: number | null;
+	created_at: string;
+}

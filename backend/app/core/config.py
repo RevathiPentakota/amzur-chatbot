@@ -17,10 +17,11 @@ class Settings(BaseSettings):
     LITELLM_PROXY_URL: str = ""
     LITELLM_API_KEY: str = ""
     LLM_MODEL: str = "gpt-4o"
-    VISION_MODEL: str = "gemini-2.0-flash"
-    LLM_TIMEOUT_SECONDS: int = 30
+    VISION_MODEL: str = "gpt-4o"
+    IMAGE_GEN_MODEL: str = "gemini/imagen-4.0-fast-generate-001"
+    LLM_TIMEOUT_SECONDS: int = 120
     UPLOAD_DIR: str = "./uploads"
-    MAX_UPLOAD_MB: int = 15
+    MAX_UPLOAD_MB: int = 25
     SECRET_KEY: str = ""
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60

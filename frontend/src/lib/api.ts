@@ -6,6 +6,8 @@ import type {
   AuthPayload,
   AuthResponse,
   ChatHistoryItem,
+  ImageGenerateRequest,
+  ImageGenerateResponse,
   ThreadCreatePayload,
   ThreadItem,
   ThreadUpdatePayload,
@@ -175,4 +177,17 @@ export async function removeThread(threadId: number): Promise<{ message: string 
 
 export function googleLoginUrl(): string {
   return `${API_BASE_URL}/auth/google/login`;
+}
+
+export async function generateImage(
+  payload: ImageGenerateRequest,
+): Promise<ImageGenerateResponse> {
+  return api<ImageGenerateResponse>("/images/generate", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function generatedImageUrl(imageId: number): string {
+  return `${API_BASE_URL}/images/${imageId}/content`;
 }
