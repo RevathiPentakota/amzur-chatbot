@@ -13,6 +13,7 @@ from app.models.chat_message import ChatMessage
 from app.models.thread import Thread
 from app.models.user import User
 from app.services.attachment_service import attachment_service
+from app.services.video_service import video_service
 
 
 class ChatService:
@@ -169,6 +170,28 @@ class ChatService:
             )
         return blocks
 
+    @staticmethod
+    async def _video_frame_blocks(
+        attachments: list[Attachment],
+    ) -> tuple[list[dict[str, object]], list[str]]:
+        """Extract frames from all video attachments and return (image_url blocks, filenames)."""
+        import asyncio
+
+        blocks: list[dict[str, object]] = []
+        filenames: list[str] = []
+        for attachment in attachments:
+            if attachment.file_type != "video":
+                continue
+            video_blocks = await asyncio.to_thread(
+                video_service.frames_as_image_blocks,
+                attachment.file_path,
+                attachment.original_filename,
+            )
+            if video_blocks:
+                blocks.extend(video_blocks)
+                filenames.append(attachment.original_filename)
+        return blocks, filenames
+
     async def generate_reply(
         self,
         message: str,
@@ -225,12 +248,26 @@ class ChatService:
                 f"--- Document content ---\n{attachment_context}\n--- End of document content ---"
             )
 
-        # If images are attached, send multimodal prompt via vision model.
+        # Collect visual content: direct images + extracted video frames.
         image_blocks = self._image_blocks(attachment_items)
+        video_blocks, video_filenames = await self._video_frame_blocks(attachment_items)
+        all_visual_blocks = image_blocks + video_blocks
+
         model_to_use = settings.LLM_MODEL
-        if image_blocks:
+        if all_visual_blocks:
             model_to_use = settings.VISION_MODEL
             history_text = self._history_as_text(conversation_history)
+
+            video_note = ""
+            if video_filenames:
+                names = ", ".join(video_filenames)
+                n = len(video_blocks)
+                video_note = (
+                    f"\n\nNote: The following {n} image(s) are key frames extracted "
+                    f"automatically from the uploaded video file(s): {names}. "
+                    "Analyse the visual content of those frames to answer the user."
+                )
+
             multimodal_text = (
                 (f"Conversation history:\n{history_text}\n\n" if history_text else "")
                 + f"User message:\n{message}"
@@ -239,11 +276,12 @@ class ChatService:
                     if attachment_context
                     else ""
                 )
+                + video_note
             )
             messages_to_send = [
                 {
                     "role": "user",
-                    "content": [{"type": "text", "text": multimodal_text}, *image_blocks],
+                    "content": [{"type": "text", "text": multimodal_text}, *all_visual_blocks],
                 }
             ]
         else:

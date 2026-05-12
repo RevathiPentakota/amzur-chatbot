@@ -211,7 +211,9 @@ class AttachmentService:
             return ""
 
         if attachment.file_type == "video":
-            return f"[Video attached: {attachment.original_filename}]"
+            # Video content is analysed visually via extracted frames in chat_service.
+            # No text fallback is needed here.
+            return ""
 
         raw_bytes = path.read_bytes()
         ext = path.suffix.lower()

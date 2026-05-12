@@ -20,3 +20,4 @@ python-multipart
 openpyxl
 pypdf
 python-docx
+opencv-python-headless

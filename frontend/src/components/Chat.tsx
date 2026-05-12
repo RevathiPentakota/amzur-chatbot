@@ -526,23 +526,23 @@ export function Chat() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100/80 p-4">
-      <div className="mx-auto h-[88vh] w-full max-w-6xl overflow-hidden rounded-2xl border border-slate-200/70 bg-white shadow-xl">
-        <div className="grid h-full grid-cols-12">
-          <aside className="col-span-12 flex flex-col border-b border-slate-200/70 bg-slate-50/90 p-3 md:col-span-4 md:border-b-0 md:border-r">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-slate-700">Threads</h2>
+    <div className="flex h-screen overflow-hidden bg-gray-50">
+      <div className="flex h-full w-full overflow-hidden">
+        <div className="flex h-full w-full">
+          <aside className="flex w-64 shrink-0 flex-col border-r border-slate-200 bg-white">
+            <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-4 py-3">
+              <span className="text-[13px] font-semibold tracking-wide text-slate-500 uppercase">Threads</span>
               <button
                 onClick={() => {
                   void handleCreateThread();
                 }}
-                className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-blue-700"
+                className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700"
               >
-                New
+                + New
               </button>
             </div>
 
-            <div className="flex-1 space-y-2 overflow-y-auto md:h-[calc(88vh-140px)]">
+            <div className="flex-1 space-y-0.5 overflow-y-auto px-2 py-2">
               {loadingThreads && <p className="text-sm text-slate-500">Loading threads...</p>}
 
               {!loadingThreads && threads.length === 0 && (
@@ -552,61 +552,73 @@ export function Chat() {
               {threads.map((thread) => (
                 <div
                   key={thread.id}
-                  className={`group rounded-xl p-2 transition ${
+                  className={`group flex items-center justify-between rounded-lg px-3 py-2 transition-colors ${
                     selectedThreadId === thread.id
-                      ? "border border-blue-200 bg-blue-50 shadow-sm"
-                      : "bg-transparent hover:bg-slate-100"
+                      ? "bg-blue-50 text-blue-700"
+                      : "text-slate-700 hover:bg-slate-100"
                   }`}
                 >
                   <button
                     onClick={() => setSelectedThreadId(thread.id)}
-                    className="w-full text-left"
+                    className="min-w-0 flex-1 text-left"
                   >
-                    <p className="truncate text-sm font-medium text-slate-800">
+                    <p className={`truncate text-[13px] font-medium ${
+                      selectedThreadId === thread.id ? "text-blue-700" : "text-slate-700"
+                    }`}>
                       {thread.title ?? "Untitled thread"}
                     </p>
                   </button>
-                  <div className="mt-1.5 flex gap-2 opacity-0 transition group-hover:opacity-100">
+                  <div className="ml-1 flex shrink-0 gap-1 opacity-0 transition group-hover:opacity-100">
                     <button
                       onClick={() => {
                         void handleRenameThread(thread);
                       }}
-                      className="rounded-md px-2 py-1 text-xs text-slate-600 hover:bg-slate-200"
+                      className="rounded p-1 text-xs text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                      title="Rename"
                     >
-                      Rename
+                      ✎
                     </button>
                     <button
                       onClick={() => {
                         void handleDeleteThread(thread);
                       }}
-                      className="rounded-md px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                      className="rounded p-1 text-xs text-slate-400 hover:bg-red-50 hover:text-red-600"
+                      title="Delete"
                     >
-                      Delete
+                      ✕
                     </button>
                   </div>
                 </div>
               ))}
             </div>
 
-            <button
-              onClick={() => {
-                void handleLogout();
-              }}
-              className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-100"
-            >
-              Logout
-            </button>
+            <div className="shrink-0 border-t border-slate-100 p-3">
+              <button
+                onClick={() => {
+                  void handleLogout();
+                }}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] font-medium text-slate-600 transition hover:bg-slate-100"
+              >
+                Logout
+              </button>
+            </div>
           </aside>
 
-          <section className="col-span-12 flex h-full min-h-0 flex-col md:col-span-8">
-            <div className="border-b border-slate-200/70 bg-white px-4 py-3">
-              <h1 className="truncate text-xs font-semibold tracking-wide text-slate-700">
-                {selectedThread?.title ?? "amzur chatbot"}
-              </h1>
+          <section className="flex min-w-0 flex-1 flex-col">
+            <div className="flex shrink-0 items-center border-b border-slate-200 bg-white px-6 py-3">
+              <div className="flex items-center gap-2">
+                <div className="h-2 w-2 rounded-full bg-blue-500"></div>
+                <h1 className="truncate text-[14px] font-semibold text-slate-800">
+                  {selectedThread?.title ?? "amzur chatbot"}
+                </h1>
+              </div>
+              {usePdfRag && ragPdfs.length > 0 && (
+                <span className="ml-3 rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-medium text-indigo-700">PDF QA</span>
+              )}
             </div>
 
-            <div className="flex-1 min-h-0 overflow-y-auto bg-slate-50/70 px-4 py-4">
-              <div className="mx-auto w-full max-w-2xl space-y-3 pb-2">
+            <div className="flex-1 min-h-0 overflow-y-auto bg-gray-50 px-4 py-6">
+              <div className="mx-auto w-full max-w-3xl space-y-4 pb-4">
                 {loadingMessages && <p className="text-sm text-slate-500">Loading messages...</p>}
 
                 {!loadingMessages && selectedThreadId === null && (
@@ -623,10 +635,10 @@ export function Chat() {
                     className={`flex ${msg.sender === "user" ? "justify-end" : "justify-start"}`}
                   >
                     <div
-                      className={`max-w-[80%] min-w-0 overflow-hidden wrap-break-word rounded-xl px-4 py-2 text-sm shadow-sm ${
+                      className={`max-w-[78%] min-w-0 rounded-2xl px-5 py-3 text-[14px] leading-relaxed shadow-sm ${
                         msg.sender === "user"
                           ? "bg-blue-600 text-white"
-                          : "bg-gray-200 text-slate-800"
+                          : "border border-slate-200 bg-white text-slate-800"
                       }`}
                     >
                       {msg.sender === "user" ? (
@@ -642,24 +654,24 @@ export function Chat() {
                         </div>
                       ) : msg.generatedImageId ? (
                         <div className="space-y-2">
-                          <p className="text-xs text-slate-500 italic">Generated: {msg.generatedImagePrompt}</p>
+                          <p className="text-xs text-slate-400 italic">Generated: {msg.generatedImagePrompt}</p>
                           <img
                             src={generatedImageUrl(msg.generatedImageId)}
                             alt={msg.generatedImagePrompt}
-                            className="max-h-80 rounded-lg border border-slate-300 object-contain"
+                            className="max-h-80 rounded-xl border border-slate-200 object-contain"
                           />
                         </div>
                       ) : (
-                        <div className="prose prose-sm max-w-none
+                        <div className="prose prose-sm max-w-none text-slate-800
                           prose-p:my-1 prose-p:leading-relaxed
                           prose-ul:my-1 prose-ul:pl-4
                           prose-ol:my-1 prose-ol:pl-4
                           prose-li:my-0.5
-                          prose-strong:font-semibold
-                          prose-code:rounded prose-code:bg-slate-300 prose-code:px-1 prose-code:text-xs
-                          prose-pre:my-2 prose-pre:overflow-x-auto prose-pre:rounded-lg prose-pre:bg-slate-700 prose-pre:p-3 prose-pre:text-xs prose-pre:text-slate-100
-                          prose-headings:my-1 prose-headings:font-semibold
-                          prose-blockquote:border-l-2 prose-blockquote:border-slate-400 prose-blockquote:pl-3 prose-blockquote:italic
+                          prose-strong:font-semibold prose-strong:text-slate-900
+                          prose-code:rounded prose-code:bg-slate-100 prose-code:px-1 prose-code:py-0.5 prose-code:text-xs prose-code:text-slate-700
+                          prose-pre:my-2 prose-pre:overflow-x-auto prose-pre:rounded-xl prose-pre:bg-slate-800 prose-pre:p-4 prose-pre:text-xs prose-pre:text-slate-100
+                          prose-headings:my-2 prose-headings:font-semibold prose-headings:text-slate-900
+                          prose-blockquote:border-l-2 prose-blockquote:border-slate-300 prose-blockquote:pl-3 prose-blockquote:italic prose-blockquote:text-slate-600
                         ">
                           <ReactMarkdown>{msg.text}</ReactMarkdown>
                         </div>
@@ -670,23 +682,23 @@ export function Chat() {
 
                 {sending && (
                   <div className="flex justify-start">
-                    <div className="max-w-[80%] rounded-xl bg-gray-200 px-4 py-2 text-sm italic text-slate-600 shadow-sm">
-                      thinking...
+                    <div className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-[13px] italic text-slate-400 shadow-sm">
+                      thinking…
                     </div>
                   </div>
                 )}
 
                 {generatingImage && (
                   <div className="flex justify-start">
-                    <div className="max-w-[80%] rounded-xl bg-gray-200 px-4 py-2 text-sm italic text-slate-600 shadow-sm">
-                      Generating image...
+                    <div className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-[13px] italic text-slate-400 shadow-sm">
+                      Generating image…
                     </div>
                   </div>
                 )}
               </div>
             </div>
 
-            <div className="border-t border-slate-200/70 bg-white/95 p-3 backdrop-blur">
+            <div className="shrink-0 border-t border-slate-200 bg-white px-4 py-3">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -710,16 +722,16 @@ export function Chat() {
               />
 
               {ragPdfs.length > 0 && (
-                <div className="mx-auto mb-2 w-full max-w-2xl rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2">
-                  <p className="mb-1 text-xs font-semibold text-indigo-700">PDFs in this thread</p>
-                  <div className="flex flex-wrap gap-2">
+                <div className="mx-auto mb-2 w-full max-w-3xl rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-indigo-500">PDFs:</span>
                     {ragPdfs.map((pdf) => (
                       <a
                         key={pdf.id}
                         href={ragPdfContentUrl(pdf.id)}
                         target="_blank"
                         rel="noreferrer"
-                        className="rounded-md bg-white px-2 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-100"
+                        className="rounded-md bg-white px-2 py-0.5 text-xs font-medium text-indigo-700 shadow-sm hover:bg-indigo-100"
                       >
                         {pdf.filename}
                       </a>
@@ -729,7 +741,7 @@ export function Chat() {
               )}
 
               {pendingAttachments.length > 0 && (
-                <div className="mx-auto mb-2 w-full max-w-2xl space-y-2">
+                <div className="mx-auto mb-2 w-full max-w-3xl space-y-1.5">
                   {pendingAttachments.map((item) => (
                     <div
                       key={item.localId}
@@ -771,45 +783,53 @@ export function Chat() {
               )}
 
               {pendingAttachments.some((item) => Boolean(item.error)) && (
-                <div className="mx-auto mb-2 w-full max-w-2xl rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  One or more attachments failed to upload. Remove failed files and try attaching again.
+                <div className="mx-auto mb-2 w-full max-w-3xl rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  One or more attachments failed. Remove failed files and try again.
                 </div>
               )}
 
-              <div className="mx-auto flex w-full max-w-2xl items-end gap-2 rounded-full border border-slate-200 bg-white p-1.5 shadow-sm">
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={sending || loadingMessages || preparingUpload || generatingImage || ragUploading}
-                  className="h-10 rounded-full border border-slate-200 px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Attach
-                </button>
-                <button
-                  type="button"
-                  onClick={() => pdfInputRef.current?.click()}
-                  disabled={sending || loadingMessages || ragUploading || generatingImage}
-                  title="Upload PDF for RAG"
-                  className="h-10 rounded-full border border-indigo-200 px-3 text-sm font-medium text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  PDF
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowImagePrompt((v) => !v)}
-                  disabled={sending || loadingMessages || generatingImage}
-                  title="Generate image with AI"
-                  className="h-10 rounded-full border border-slate-200 px-3 text-sm font-medium text-slate-700 transition hover:bg-purple-50 hover:border-purple-300 hover:text-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  🖼
-                </button>
+              <div className="mx-auto flex w-full max-w-3xl items-end gap-1.5 rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-sm focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-100">
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={sending || loadingMessages || preparingUpload || generatingImage || ragUploading}
+                    title="Attach file"
+                    className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                      <path fillRule="evenodd" d="M15.621 4.379a3 3 0 0 0-4.242 0l-7 7a1.5 1.5 0 0 0 2.122 2.121l7-7a.5.5 0 0 1 .707.708l-7 7a2.5 2.5 0 0 1-3.536-3.536l7-7a4.5 4.5 0 0 1 6.364 6.364l-7 7a6.5 6.5 0 0 1-9.192-9.192l7-7a.75.75 0 0 1 1.06 1.061l-7 7A5 5 0 0 0 11 17.5l7-7a3 3 0 0 0 0-4.243Z" clipRule="evenodd" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => pdfInputRef.current?.click()}
+                    disabled={sending || loadingMessages || ragUploading || generatingImage}
+                    title="Upload PDF for RAG"
+                    className="rounded-lg px-2 py-1.5 text-[11px] font-semibold text-indigo-500 transition hover:bg-indigo-50 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    PDF
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowImagePrompt((v) => !v)}
+                    disabled={sending || loadingMessages || generatingImage}
+                    title="Generate image with AI"
+                    className="rounded-lg p-2 text-slate-400 transition hover:bg-purple-50 hover:text-purple-600 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                      <path fillRule="evenodd" d="M1 5.25A2.25 2.25 0 0 1 3.25 3h13.5A2.25 2.25 0 0 1 19 5.25v9.5A2.25 2.25 0 0 1 16.75 17H3.25A2.25 2.25 0 0 1 1 14.75v-9.5Zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 0 0 .75-.75v-2.69l-2.22-2.219a.75.75 0 0 0-1.06 0l-1.91 1.909-.48-.48a.75.75 0 0 0-1.06 0L6.53 11.06l-4.03-4.03v4.03Zm3.5-5.81a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z" clipRule="evenodd" />
+                    </svg>
+                  </button>
+                </div>
                 <textarea
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyPress={handleKeyPress}
-                  placeholder="Type your message..."
+                  placeholder="Message..."
                   disabled={sending || loadingMessages}
-                  className="h-11 max-h-28 flex-1 resize-none rounded-full bg-transparent px-4 py-2 text-sm text-slate-800 shadow-sm outline-none focus:ring-2 focus:ring-blue-400"
+                  rows={1}
+                  className="max-h-32 min-h-9 flex-1 resize-none bg-transparent py-1.5 text-[14px] text-slate-800 placeholder-slate-400 outline-none"
                 />
                 <button
                   onClick={() => {
@@ -825,23 +845,25 @@ export function Chat() {
                     || pendingAttachments.some((item) => Boolean(item.error))
                     || (!input.trim() && pendingAttachments.filter((item) => typeof item.id === "number").length === 0)
                   }
-                  className="h-10 rounded-full bg-blue-600 px-5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="shrink-0 self-end rounded-xl bg-blue-600 px-4 py-2 text-[13px] font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {sending
-                    ? "Sending..."
+                    ? "Sending…"
                     : preparingUpload || pendingAttachments.some((item) => item.uploading)
-                      ? "Uploading..."
+                      ? "Uploading…"
                       : "Send"}
                 </button>
               </div>
 
               {ragPdfs.length > 0 && (
-                <div className="mx-auto mt-2 flex w-full max-w-2xl items-center justify-between px-2 text-xs">
-                  <span className="font-medium text-indigo-700">PDF QA mode</span>
+                <div className="mx-auto mt-2 flex w-full max-w-3xl items-center gap-3 px-1 text-xs">
+                  <span className="font-medium text-indigo-600">PDF QA mode</span>
                   <button
                     type="button"
                     onClick={() => setUsePdfRag((v) => !v)}
-                    className={`rounded-full px-2 py-1 font-medium ${usePdfRag ? "bg-indigo-600 text-white" : "bg-slate-200 text-slate-700"}`}
+                    className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${
+                      usePdfRag ? "bg-indigo-600 text-white" : "bg-slate-200 text-slate-600 hover:bg-slate-300"
+                    }`}
                   >
                     {usePdfRag ? "On" : "Off"}
                   </button>
@@ -884,7 +906,7 @@ export function Chat() {
               )}
 
               {(preparingUpload || pendingAttachments.some((item) => item.uploading)) && (
-                <div className="mx-auto mt-2 w-full max-w-2xl px-2 text-xs font-medium text-blue-700">
+                <div className="mx-auto mt-1.5 w-full max-w-3xl px-1 text-xs font-medium text-blue-600">
                   {preparingUpload
                     ? "Preparing upload..."
                     : `Uploading ${pendingAttachments.filter((item) => item.uploading).length} file(s)...`}
@@ -892,8 +914,8 @@ export function Chat() {
               )}
 
               {ragUploading && (
-                <div className="mx-auto mt-2 w-full max-w-2xl px-2 text-xs font-medium text-indigo-700">
-                  Processing PDF for RAG... {ragUploadProgress}%
+                <div className="mx-auto mt-1.5 w-full max-w-3xl px-1 text-xs font-medium text-indigo-600">
+                  Processing PDF... {ragUploadProgress}%
                 </div>
               )}
             </div>
