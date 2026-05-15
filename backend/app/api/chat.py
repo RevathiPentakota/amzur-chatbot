@@ -6,7 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.attachment import AttachmentResponse
-from app.schemas.chat import ChatHistoryItem, ChatRequest, ChatResponse
+from app.schemas.chat import ChatHistoryItem, ChatRequest, ChatResponse, ThreadHistoryResponse
+from app.schemas.image_generation import ImageGenerateResponse
 from app.services.attachment_service import attachment_service
 from app.services.auth_service import get_current_user
 from app.services.chat_service import chat_service
@@ -69,14 +70,29 @@ async def chat_history(
     return [ChatHistoryItem.model_validate(item) for item in history]
 
 
-@router.get("/thread/{thread_id}/messages", response_model=list[ChatHistoryItem])
+@router.get("/thread/{thread_id}/messages", response_model=ThreadHistoryResponse)
 async def thread_messages(
     thread_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> list[ChatHistoryItem]:
+) -> ThreadHistoryResponse:
     try:
-        history = await chat_service.history_by_thread(db, current_user, thread_id)
+        messages, images = await chat_service.history_by_thread(db, current_user, thread_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return [ChatHistoryItem.model_validate(item) for item in history]
+
+    image_items = [
+        ImageGenerateResponse(
+            id=img.id,
+            image_url=f"/images/{img.id}/content",
+            prompt=img.prompt,
+            thread_id=img.thread_id,
+            created_at=img.created_at,
+        )
+        for img in images
+    ]
+
+    return ThreadHistoryResponse(
+        messages=[ChatHistoryItem.model_validate(item) for item in messages],
+        images=image_items,
+    )

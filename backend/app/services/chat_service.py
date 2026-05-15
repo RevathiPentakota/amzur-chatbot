@@ -434,20 +434,31 @@ class ChatService:
         db: AsyncSession,
         user: User,
         thread_id: int,
-    ) -> list[ChatMessage]:
+    ) -> tuple[list[ChatMessage], list]:
+        from app.models.generated_image import GeneratedImage
+        
         thread = await db.scalar(
             select(Thread).where(Thread.id == thread_id, Thread.user_id == user.id)
         )
         if not thread:
             raise ValueError("Thread not found")
 
-        result = await db.scalars(
+        # Load messages with attachments
+        messages = await db.scalars(
             select(ChatMessage)
             .options(selectinload(ChatMessage.attachments))
             .where(ChatMessage.user_id == user.id, ChatMessage.thread_id == thread_id)
             .order_by(ChatMessage.created_at.asc())
         )
-        return list(result)
+        
+        # Load generated images for the thread
+        images = await db.scalars(
+            select(GeneratedImage)
+            .where(GeneratedImage.thread_id == thread_id, GeneratedImage.user_id == user.id)
+            .order_by(GeneratedImage.created_at.asc())
+        )
+        
+        return list(messages), list(images)
 
 
 chat_service = ChatService()

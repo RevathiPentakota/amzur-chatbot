@@ -3,6 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel
 
 from app.schemas.attachment import AttachmentResponse
+from app.schemas.image_generation import ImageGenerateResponse
 
 
 class ChatRequest(BaseModel):
@@ -25,3 +26,8 @@ class ChatHistoryItem(BaseModel):
     attachments: list[AttachmentResponse] = []
 
     model_config = {"from_attributes": True}
+
+
+class ThreadHistoryResponse(BaseModel):
+    messages: list[ChatHistoryItem] = []
+    images: list[ImageGenerateResponse] = []

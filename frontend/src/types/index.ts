@@ -33,6 +33,11 @@ export interface ChatHistoryItem {
 	attachments?: AttachmentItem[];
 }
 
+export interface ThreadHistoryResponse {
+	messages: ChatHistoryItem[];
+	images: ImageGenerateResponse[];
+}
+
 export interface AttachmentItem {
 	id: number;
 	user_id: number;
@@ -88,4 +93,15 @@ export interface RagChatRequest {
 export interface RagChatResponse {
 	answer: string;
 	thread_id: number;
+}
+
+export interface SqlChatRequest {
+	question: string;
+	thread_id: number;
+}
+
+export interface SqlChatResponse {
+	sql: string;
+	result: Array<Record<string, string | number | boolean | null>>;
+	answer: string;
 }

@@ -15,6 +15,9 @@ import type {
   ThreadItem,
   ThreadUpdatePayload,
   ChatResponse,
+  ThreadHistoryResponse,
+  SqlChatRequest,
+  SqlChatResponse,
 } from "../types";
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -85,8 +88,8 @@ export async function getChatHistory(): Promise<ChatHistoryItem[]> {
   });
 }
 
-export async function getMessagesByThread(threadId: number): Promise<ChatHistoryItem[]> {
-  return api<ChatHistoryItem[]>(`/chat/thread/${threadId}/messages`, {
+export async function getMessagesByThread(threadId: number): Promise<ThreadHistoryResponse> {
+  return api<ThreadHistoryResponse>(`/chat/thread/${threadId}/messages`, {
     method: "GET",
   });
 }
@@ -207,6 +210,13 @@ export async function listThreadRagPdfs(threadId: number): Promise<RagPdfItem[]>
 
 export async function ragChat(payload: RagChatRequest): Promise<RagChatResponse> {
   return api<RagChatResponse>("/rag/chat", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function sqlChat(payload: SqlChatRequest): Promise<SqlChatResponse> {
+  return api<SqlChatResponse>("/sql/chat", {
     method: "POST",
     body: JSON.stringify(payload),
   });

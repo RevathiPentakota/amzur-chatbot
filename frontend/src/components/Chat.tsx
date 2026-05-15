@@ -15,11 +15,19 @@ import {
   removeThread,
   renameThread,
   sendMessage,
+  sqlChat,
   uploadRagPdf,
   uploadAttachment,
 } from "../lib/api";
 
-import type { AttachmentItem, ChatHistoryItem, RagPdfItem, ThreadItem } from "../types";
+import type {
+  AttachmentItem,
+  ChatHistoryItem,
+  RagPdfItem,
+  ThreadItem,
+  ImageGenerateResponse,
+  SqlChatResponse,
+} from "../types";
 
 interface Message {
   id: string;
@@ -28,6 +36,8 @@ interface Message {
   attachments?: AttachmentItem[];
   generatedImageId?: number;
   generatedImagePrompt?: string;
+  sqlQuery?: string;
+  sqlResult?: SqlChatResponse["result"];
 }
 
 interface PendingAttachment {
@@ -63,6 +73,7 @@ export function Chat() {
   const [ragUploading, setRagUploading] = useState(false);
   const [ragUploadProgress, setRagUploadProgress] = useState(0);
   const [usePdfRag, setUsePdfRag] = useState(false);
+  const [chatMode, setChatMode] = useState<"chat" | "sql">("chat");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pdfInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -91,8 +102,8 @@ export function Chat() {
 
       setLoadingMessages(true);
       try {
-        const history = await getMessagesByThread(selectedThreadId);
-        setMessages(mapHistoryToMessages(history));
+        const response = await getMessagesByThread(selectedThreadId);
+        setMessages(mapHistoryToMessages(response.messages, response.images));
         const pdfs = await listThreadRagPdfs(selectedThreadId);
         setRagPdfs(pdfs);
         setUsePdfRag(pdfs.length > 0);
@@ -149,6 +160,7 @@ export function Chat() {
   };
 
   const handleSend = async () => {
+    const isSqlMode = chatMode === "sql";
     const hasText = Boolean(input.trim());
     const uploading = pendingAttachments.some((item) => item.uploading);
     const hasUploadErrors = pendingAttachments.some((item) => Boolean(item.error));
@@ -160,7 +172,7 @@ export function Chat() {
       (item) => !item.uploading && !item.error && typeof item.id !== "number",
     );
 
-    if ((!hasText && readyAttachments.length === 0) || uploading || hasUploadErrors) {
+    if ((isSqlMode && !hasText) || (!isSqlMode && !hasText && readyAttachments.length === 0) || uploading || hasUploadErrors) {
       return;
     }
 
@@ -205,6 +217,21 @@ export function Chat() {
     setSending(true);
 
     try {
+      if (isSqlMode) {
+        const sqlResponse = await sqlChat({ question: content, thread_id: threadId });
+        const botMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          text: sqlResponse.answer,
+          sender: "bot",
+          sqlQuery: sqlResponse.sql,
+          sqlResult: sqlResponse.result,
+        };
+        setMessages((prev) => [...prev, botMessage]);
+        const updatedThreads = await getThreads();
+        setThreads(updatedThreads);
+        return;
+      }
+
       const useRagPath = usePdfRag && ragPdfs.length > 0 && readyAttachments.length === 0 && Boolean(content);
       if (useRagPath) {
         const response = await ragChat({ thread_id: threadId, question: content });
@@ -612,8 +639,31 @@ export function Chat() {
                   {selectedThread?.title ?? "amzur chatbot"}
                 </h1>
               </div>
+              <div className="ml-4 inline-flex rounded-full border border-slate-200 bg-slate-50 p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setChatMode("chat")}
+                  className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${
+                    chatMode === "chat" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  Chat
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setChatMode("sql")}
+                  className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${
+                    chatMode === "sql" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  Database Chat
+                </button>
+              </div>
               {usePdfRag && ragPdfs.length > 0 && (
                 <span className="ml-3 rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-medium text-indigo-700">PDF QA</span>
+              )}
+              {chatMode === "sql" && (
+                <span className="ml-3 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">Read-only SQL</span>
               )}
             </div>
 
@@ -660,6 +710,20 @@ export function Chat() {
                             alt={msg.generatedImagePrompt}
                             className="max-h-80 rounded-xl border border-slate-200 object-contain"
                           />
+                        </div>
+                      ) : msg.sqlQuery ? (
+                        <div className="space-y-3">
+                          <div>
+                            <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Generated SQL</p>
+                            <pre className="overflow-x-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100">
+                              <code>{msg.sqlQuery}</code>
+                            </pre>
+                          </div>
+                          <SqlResultTable rows={msg.sqlResult ?? []} />
+                          <div>
+                            <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Explanation</p>
+                            <p className="whitespace-pre-wrap text-sm text-slate-800">{msg.text}</p>
+                          </div>
                         </div>
                       ) : (
                         <div className="prose prose-sm max-w-none text-slate-800
@@ -793,7 +857,7 @@ export function Chat() {
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    disabled={sending || loadingMessages || preparingUpload || generatingImage || ragUploading}
+                    disabled={chatMode === "sql" || sending || loadingMessages || preparingUpload || generatingImage || ragUploading}
                     title="Attach file"
                     className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
                   >
@@ -804,7 +868,7 @@ export function Chat() {
                   <button
                     type="button"
                     onClick={() => pdfInputRef.current?.click()}
-                    disabled={sending || loadingMessages || ragUploading || generatingImage}
+                    disabled={chatMode === "sql" || sending || loadingMessages || ragUploading || generatingImage}
                     title="Upload PDF for RAG"
                     className="rounded-lg px-2 py-1.5 text-[11px] font-semibold text-indigo-500 transition hover:bg-indigo-50 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
                   >
@@ -813,7 +877,7 @@ export function Chat() {
                   <button
                     type="button"
                     onClick={() => setShowImagePrompt((v) => !v)}
-                    disabled={sending || loadingMessages || generatingImage}
+                    disabled={chatMode === "sql" || sending || loadingMessages || generatingImage}
                     title="Generate image with AI"
                     className="rounded-lg p-2 text-slate-400 transition hover:bg-purple-50 hover:text-purple-600 disabled:cursor-not-allowed disabled:opacity-40"
                   >
@@ -826,7 +890,7 @@ export function Chat() {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyPress={handleKeyPress}
-                  placeholder="Message..."
+                  placeholder={chatMode === "sql" ? "Ask a database question in plain English..." : "Message..."}
                   disabled={sending || loadingMessages}
                   rows={1}
                   className="max-h-32 min-h-9 flex-1 resize-none bg-transparent py-1.5 text-[14px] text-slate-800 placeholder-slate-400 outline-none"
@@ -843,7 +907,9 @@ export function Chat() {
                     || ragUploading
                     || pendingAttachments.some((item) => item.uploading)
                     || pendingAttachments.some((item) => Boolean(item.error))
-                    || (!input.trim() && pendingAttachments.filter((item) => typeof item.id === "number").length === 0)
+                    || (chatMode === "sql"
+                      ? !input.trim()
+                      : (!input.trim() && pendingAttachments.filter((item) => typeof item.id === "number").length === 0))
                   }
                   className="shrink-0 self-end rounded-xl bg-blue-600 px-4 py-2 text-[13px] font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
                 >
@@ -926,21 +992,59 @@ export function Chat() {
   );
 }
 
-function mapHistoryToMessages(history: ChatHistoryItem[]): Message[] {
+function mapHistoryToMessages(
+  history: ChatHistoryItem[],
+  images: ImageGenerateResponse[] = []
+): Message[] {
   const mapped: Message[] = [];
 
+  // Combine messages and images into a single chronological array
+  const allItems: Array<{ type: "message" | "image"; item: ChatHistoryItem | ImageGenerateResponse; date: Date }> = [];
+
   for (const item of history) {
-    mapped.push({
-      id: `u-${item.id}`,
-      text: item.message,
-      sender: "user",
-      attachments: item.attachments ?? [],
+    allItems.push({
+      type: "message",
+      item,
+      date: new Date(item.created_at),
     });
-    mapped.push({
-      id: `b-${item.id}`,
-      text: item.response,
-      sender: "bot",
+  }
+
+  for (const image of images) {
+    allItems.push({
+      type: "image",
+      item: image,
+      date: new Date(image.created_at),
     });
+  }
+
+  // Sort by date (ascending, oldest first)
+  allItems.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+  // Convert to Message array
+  for (const entry of allItems) {
+    if (entry.type === "message") {
+      const msg = entry.item as ChatHistoryItem;
+      mapped.push({
+        id: `u-${msg.id}`,
+        text: msg.message,
+        sender: "user",
+        attachments: msg.attachments ?? [],
+      });
+      mapped.push({
+        id: `b-${msg.id}`,
+        text: msg.response,
+        sender: "bot",
+      });
+    } else {
+      const img = entry.item as ImageGenerateResponse;
+      mapped.push({
+        id: `img-${img.id}`,
+        text: `[Generated Image: ${img.prompt}]`,
+        sender: "bot",
+        generatedImageId: img.id,
+        generatedImagePrompt: img.prompt,
+      });
+    }
   }
 
   return mapped;
@@ -984,5 +1088,41 @@ function AttachmentPreview({
     >
       {attachment.original_filename}
     </a>
+  );
+}
+
+function SqlResultTable({ rows }: { rows: Array<Record<string, string | number | boolean | null>> }) {
+  if (!rows.length) {
+    return <p className="text-xs text-slate-500">No rows returned.</p>;
+  }
+
+  const columns = Object.keys(rows[0]);
+
+  return (
+    <div>
+      <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Results</p>
+      <div className="overflow-x-auto rounded-lg border border-slate-200">
+        <table className="min-w-full text-left text-xs">
+          <thead className="bg-slate-100 text-slate-700">
+            <tr>
+              {columns.map((column) => (
+                <th key={column} className="px-3 py-2 font-semibold">{column}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => (
+              <tr key={`sql-row-${index}`} className="border-t border-slate-100">
+                {columns.map((column) => (
+                  <td key={`${index}-${column}`} className="px-3 py-2 text-slate-800">
+                    {row[column] === null ? "NULL" : String(row[column])}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
