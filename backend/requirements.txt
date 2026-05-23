@@ -17,7 +17,15 @@ langchain
 langchain-community
 langchain-openai
 python-multipart
+pandas
 openpyxl
+gspread
+google-auth
+tabulate
 pypdf
 python-docx
 opencv-python-headless
+langchain-experimental
+langgraph
+arxiv
+sse-starlette

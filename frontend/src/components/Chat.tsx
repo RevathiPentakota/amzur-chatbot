@@ -3,7 +3,9 @@ import ReactMarkdown from "react-markdown";
 
 import {
   attachmentContentUrl,
+  connectGoogleSheet,
   createThread,
+  dataframeChat,
   generateImage,
   generatedImageUrl,
   getMessagesByThread,
@@ -16,6 +18,8 @@ import {
   renameThread,
   sendMessage,
   sqlChat,
+  streamResearchDigest,
+  uploadDataFrame,
   uploadRagPdf,
   uploadAttachment,
 } from "../lib/api";
@@ -23,10 +27,13 @@ import {
 import type {
   AttachmentItem,
   ChatHistoryItem,
+  DataFrameSourceResponse,
   RagPdfItem,
   ThreadItem,
   ImageGenerateResponse,
   SqlChatResponse,
+  ResearchPaper,
+  ResearchDigestSection,
 } from "../types";
 
 interface Message {
@@ -38,6 +45,13 @@ interface Message {
   generatedImagePrompt?: string;
   sqlQuery?: string;
   sqlResult?: SqlChatResponse["result"];
+  dataframeIntermediateSteps?: string;
+  dataframeTablePreview?: Array<Record<string, string | number | boolean | null>>;
+  // Research digest fields
+  researchPapers?: ResearchPaper[];
+  researchSections?: ResearchDigestSection[];
+  researchSources?: ResearchDigestSection;
+  researchStatus?: string;
 }
 
 interface PendingAttachment {
@@ -73,9 +87,17 @@ export function Chat() {
   const [ragUploading, setRagUploading] = useState(false);
   const [ragUploadProgress, setRagUploadProgress] = useState(0);
   const [usePdfRag, setUsePdfRag] = useState(false);
-  const [chatMode, setChatMode] = useState<"chat" | "sql">("chat");
+  const [chatMode, setChatMode] = useState<"chat" | "sql" | "dataframe" | "research">("chat");
+  const [researchStreaming, setResearchStreaming] = useState(false);
+  const researchStopRef = useRef<(() => void) | null>(null);
+  const [dataframeUploading, setDataframeUploading] = useState(false);
+  const [dataframeUploadProgress, setDataframeUploadProgress] = useState(0);
+  const [showSheetPrompt, setShowSheetPrompt] = useState(false);
+  const [sheetInput, setSheetInput] = useState("");
+  const [sheetWorksheet, setSheetWorksheet] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pdfInputRef = useRef<HTMLInputElement | null>(null);
+  const dataframeInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -159,8 +181,99 @@ export function Chat() {
     }
   };
 
+  const handleResearch = async () => {
+    const topic = input.trim();
+    if (!topic || researchStreaming) return;
+
+    let threadId = selectedThreadId;
+    if (!threadId) {
+      const created = await createThread();
+      setThreads((prev) => [created, ...prev]);
+      setSelectedThreadId(created.id);
+      threadId = created.id;
+    }
+
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      text: topic,
+      sender: "user",
+    };
+    setMessages((prev) => [...prev, userMsg]);
+    setInput("");
+    setResearchStreaming(true);
+
+    // Placeholder bot message that we'll update as chunks arrive
+    const botId = (Date.now() + 1).toString();
+    const botMsg: Message = {
+      id: botId,
+      text: "",
+      sender: "bot",
+      researchStatus: "Connecting…",
+      researchPapers: [],
+      researchSections: [],
+    };
+    setMessages((prev) => [...prev, botMsg]);
+
+    const stop = streamResearchDigest(
+      { topic, thread_id: threadId },
+      {
+        onStatus: (msg) => {
+          setMessages((prev) =>
+            prev.map((m) => m.id === botId ? { ...m, researchStatus: msg } : m),
+          );
+        },
+        onPapers: (papers) => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === botId ? { ...m, researchPapers: papers as ResearchPaper[] } : m,
+            ),
+          );
+        },
+        onSection: (_evt, title, content) => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === botId
+                ? { ...m, researchSections: [...(m.researchSections ?? []), { title, content }] }
+                : m,
+            ),
+          );
+        },
+        onSources: (title, content) => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === botId ? { ...m, researchSources: { title, content } } : m,
+            ),
+          );
+        },
+        onDone: () => {
+          setMessages((prev) =>
+            prev.map((m) => m.id === botId ? { ...m, researchStatus: undefined } : m),
+          );
+          setResearchStreaming(false);
+          void getThreads().then(setThreads);
+        },
+        onError: (msg) => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === botId
+                ? { ...m, researchStatus: undefined, text: `Error: ${msg}` }
+                : m,
+            ),
+          );
+          setResearchStreaming(false);
+        },
+      },
+    );
+    researchStopRef.current = stop;
+  };
+
   const handleSend = async () => {
+    if (chatMode === "research") {
+      await handleResearch();
+      return;
+    }
     const isSqlMode = chatMode === "sql";
+    const isDataframeMode = chatMode === "dataframe";
     const hasText = Boolean(input.trim());
     const uploading = pendingAttachments.some((item) => item.uploading);
     const hasUploadErrors = pendingAttachments.some((item) => Boolean(item.error));
@@ -172,9 +285,15 @@ export function Chat() {
       (item) => !item.uploading && !item.error && typeof item.id !== "number",
     );
 
-    if ((isSqlMode && !hasText) || (!isSqlMode && !hasText && readyAttachments.length === 0) || uploading || hasUploadErrors) {
+    if (
+      ((isSqlMode || isDataframeMode) && !hasText)
+      || (!isSqlMode && !isDataframeMode && !hasText && readyAttachments.length === 0)
+      || uploading
+      || hasUploadErrors
+    ) {
       return;
     }
+
 
     if (unresolvedAttachments.length > 0) {
       const warnMessage: Message = {
@@ -225,6 +344,21 @@ export function Chat() {
           sender: "bot",
           sqlQuery: sqlResponse.sql,
           sqlResult: sqlResponse.result,
+        };
+        setMessages((prev) => [...prev, botMessage]);
+        const updatedThreads = await getThreads();
+        setThreads(updatedThreads);
+        return;
+      }
+
+      if (isDataframeMode) {
+        const response = await dataframeChat({ thread_id: threadId, question: content });
+        const botMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          text: response.answer,
+          sender: "bot",
+          dataframeIntermediateSteps: response.intermediate_steps,
+          dataframeTablePreview: response.table_preview,
         };
         setMessages((prev) => [...prev, botMessage]);
         const updatedThreads = await getThreads();
@@ -497,6 +631,106 @@ export function Chat() {
     }
   };
 
+  const handleSelectDataframe = async (files: FileList | null) => {
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    const file = files[0];
+    const ext = file.name.toLowerCase();
+    if (!ext.endsWith(".csv") && !ext.endsWith(".xlsx")) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: (Date.now() + 1).toString(),
+          text: "Only CSV and XLSX files are supported for Data Analysis mode.",
+          sender: "bot",
+        },
+      ]);
+      return;
+    }
+
+    let threadId = selectedThreadId;
+    if (!threadId) {
+      const created = await createThread();
+      setThreads((prev) => [created, ...prev]);
+      setSelectedThreadId(created.id);
+      threadId = created.id;
+    }
+
+    setDataframeUploading(true);
+    setDataframeUploadProgress(0);
+    try {
+      const source = await uploadDataFrame(file, threadId, (progress) => setDataframeUploadProgress(progress));
+      const botMsg: Message = {
+        id: Date.now().toString(),
+        text: `Data source loaded: ${source.filename}`,
+        sender: "bot",
+        dataframeTablePreview: source.table_preview,
+      };
+      setMessages((prev) => [...prev, botMsg]);
+    } catch (error) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: (Date.now() + 1).toString(),
+          text: error instanceof Error ? error.message : "Failed to upload dataframe file.",
+          sender: "bot",
+        },
+      ]);
+    } finally {
+      setDataframeUploading(false);
+      setDataframeUploadProgress(0);
+    }
+  };
+
+  const handleConnectSheet = async () => {
+    if (!sheetInput.trim()) {
+      return;
+    }
+
+    let threadId = selectedThreadId;
+    if (!threadId) {
+      const created = await createThread();
+      setThreads((prev) => [created, ...prev]);
+      setSelectedThreadId(created.id);
+      threadId = created.id;
+    }
+
+    setDataframeUploading(true);
+    setDataframeUploadProgress(0);
+    try {
+      const source: DataFrameSourceResponse = await connectGoogleSheet({
+        thread_id: threadId,
+        sheet: sheetInput.trim(),
+        worksheet_name: sheetWorksheet.trim() || undefined,
+      });
+      setShowSheetPrompt(false);
+      setSheetInput("");
+      setSheetWorksheet("");
+
+      const botMsg: Message = {
+        id: Date.now().toString(),
+        text: `Google Sheet connected: ${source.filename}`,
+        sender: "bot",
+        dataframeTablePreview: source.table_preview,
+      };
+      setMessages((prev) => [...prev, botMsg]);
+    } catch (error) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: (Date.now() + 1).toString(),
+          text: error instanceof Error ? error.message : "Failed to connect Google Sheet.",
+          sender: "bot",
+        },
+      ]);
+    } finally {
+      setDataframeUploading(false);
+      setDataframeUploadProgress(0);
+    }
+  };
+
   const handleSelectRagPdf = async (files: FileList | null) => {
     if (!files || files.length === 0) {
       return;
@@ -658,12 +892,36 @@ export function Chat() {
                 >
                   Database Chat
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setChatMode("dataframe")}
+                  className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${
+                    chatMode === "dataframe" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  Data Analysis
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setChatMode("research")}
+                  className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${
+                    chatMode === "research" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  Research
+                </button>
               </div>
               {usePdfRag && ragPdfs.length > 0 && (
                 <span className="ml-3 rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-medium text-indigo-700">PDF QA</span>
               )}
               {chatMode === "sql" && (
                 <span className="ml-3 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">Read-only SQL</span>
+              )}
+              {chatMode === "dataframe" && (
+                <span className="ml-3 rounded-full bg-cyan-100 px-2 py-0.5 text-[11px] font-medium text-cyan-700">DataFrame Agent</span>
+              )}
+              {chatMode === "research" && (
+                <span className="ml-3 rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-medium text-violet-700">arXiv Research</span>
               )}
             </div>
 
@@ -725,6 +983,30 @@ export function Chat() {
                             <p className="whitespace-pre-wrap text-sm text-slate-800">{msg.text}</p>
                           </div>
                         </div>
+                      ) : msg.researchPapers !== undefined || msg.researchSections !== undefined ? (
+                        <ResearchDigestView
+                          status={msg.researchStatus}
+                          papers={msg.researchPapers ?? []}
+                          sections={msg.researchSections ?? []}
+                          sources={msg.researchSources}
+                          errorText={msg.text || undefined}
+                        />
+                      ) : msg.dataframeIntermediateSteps || msg.dataframeTablePreview ? (
+                        <div className="space-y-3">
+                          <div>
+                            <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Answer</p>
+                            <p className="whitespace-pre-wrap text-sm text-slate-800">{msg.text}</p>
+                          </div>
+                          {msg.dataframeIntermediateSteps && (
+                            <div>
+                              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Intermediate Steps</p>
+                              <pre className="overflow-x-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100">
+                                <code>{msg.dataframeIntermediateSteps}</code>
+                              </pre>
+                            </div>
+                          )}
+                          <DataPreviewTable rows={msg.dataframeTablePreview ?? []} />
+                        </div>
                       ) : (
                         <div className="prose prose-sm max-w-none text-slate-800
                           prose-p:my-1 prose-p:leading-relaxed
@@ -743,6 +1025,14 @@ export function Chat() {
                     </div>
                   </div>
                 ))}
+
+                {researchStreaming && (
+                  <div className="flex justify-start">
+                    <div className="rounded-2xl border border-violet-200 bg-violet-50 px-5 py-3 text-[13px] italic text-violet-500 shadow-sm">
+                      Researching…
+                    </div>
+                  </div>
+                )}
 
                 {sending && (
                   <div className="flex justify-start">
@@ -781,6 +1071,16 @@ export function Chat() {
                 accept="application/pdf,.pdf"
                 onChange={(e) => {
                   void handleSelectRagPdf(e.target.files);
+                  e.currentTarget.value = "";
+                }}
+              />
+              <input
+                ref={dataframeInputRef}
+                type="file"
+                className="hidden"
+                accept=".csv,.xlsx"
+                onChange={(e) => {
+                  void handleSelectDataframe(e.target.files);
                   e.currentTarget.value = "";
                 }}
               />
@@ -854,10 +1154,32 @@ export function Chat() {
 
               <div className="mx-auto flex w-full max-w-3xl items-end gap-1.5 rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-sm focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-100">
                 <div className="flex shrink-0 items-center gap-1">
+                  {chatMode === "dataframe" && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => dataframeInputRef.current?.click()}
+                        disabled={sending || loadingMessages || dataframeUploading}
+                        title="Upload CSV/XLSX"
+                        className="rounded-lg px-2 py-1.5 text-[11px] font-semibold text-cyan-600 transition hover:bg-cyan-50 hover:text-cyan-700 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        CSV/XLSX
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowSheetPrompt((v) => !v)}
+                        disabled={sending || loadingMessages || dataframeUploading}
+                        title="Connect Google Sheet"
+                        className="rounded-lg px-2 py-1.5 text-[11px] font-semibold text-cyan-600 transition hover:bg-cyan-50 hover:text-cyan-700 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Sheet
+                      </button>
+                    </>
+                  )}
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    disabled={chatMode === "sql" || sending || loadingMessages || preparingUpload || generatingImage || ragUploading}
+                    disabled={chatMode !== "chat" || sending || loadingMessages || preparingUpload || generatingImage || ragUploading}
                     title="Attach file"
                     className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
                   >
@@ -868,7 +1190,7 @@ export function Chat() {
                   <button
                     type="button"
                     onClick={() => pdfInputRef.current?.click()}
-                    disabled={chatMode === "sql" || sending || loadingMessages || ragUploading || generatingImage}
+                    disabled={chatMode === "sql" || chatMode === "dataframe" || sending || loadingMessages || ragUploading || generatingImage}
                     title="Upload PDF for RAG"
                     className="rounded-lg px-2 py-1.5 text-[11px] font-semibold text-indigo-500 transition hover:bg-indigo-50 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
                   >
@@ -877,7 +1199,7 @@ export function Chat() {
                   <button
                     type="button"
                     onClick={() => setShowImagePrompt((v) => !v)}
-                    disabled={chatMode === "sql" || sending || loadingMessages || generatingImage}
+                    disabled={chatMode === "sql" || chatMode === "dataframe" || sending || loadingMessages || generatingImage}
                     title="Generate image with AI"
                     className="rounded-lg p-2 text-slate-400 transition hover:bg-purple-50 hover:text-purple-600 disabled:cursor-not-allowed disabled:opacity-40"
                   >
@@ -890,7 +1212,13 @@ export function Chat() {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyPress={handleKeyPress}
-                  placeholder={chatMode === "sql" ? "Ask a database question in plain English..." : "Message..."}
+                  placeholder={chatMode === "sql"
+                    ? "Ask a database question in plain English..."
+                    : chatMode === "dataframe"
+                      ? "Ask a question about your uploaded table or Google Sheet..."
+                      : chatMode === "research"
+                        ? "Enter a research topic or question (e.g. 'transformer attention mechanisms')..."
+                        : "Message..."}
                   disabled={sending || loadingMessages}
                   rows={1}
                   className="max-h-32 min-h-9 flex-1 resize-none bg-transparent py-1.5 text-[14px] text-slate-800 placeholder-slate-400 outline-none"
@@ -901,23 +1229,28 @@ export function Chat() {
                   }}
                   disabled={
                     sending
+                    || researchStreaming
                     || loadingMessages
                     || preparingUpload
                     || generatingImage
                     || ragUploading
                     || pendingAttachments.some((item) => item.uploading)
                     || pendingAttachments.some((item) => Boolean(item.error))
-                    || (chatMode === "sql"
+                    || ((chatMode === "sql" || chatMode === "dataframe" || chatMode === "research")
                       ? !input.trim()
                       : (!input.trim() && pendingAttachments.filter((item) => typeof item.id === "number").length === 0))
                   }
                   className="shrink-0 self-end rounded-xl bg-blue-600 px-4 py-2 text-[13px] font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  {sending
-                    ? "Sending…"
-                    : preparingUpload || pendingAttachments.some((item) => item.uploading)
-                      ? "Uploading…"
-                      : "Send"}
+                  {researchStreaming
+                    ? "Researching…"
+                    : sending
+                      ? "Sending…"
+                      : preparingUpload || pendingAttachments.some((item) => item.uploading)
+                        ? "Uploading…"
+                        : chatMode === "research"
+                          ? "Research"
+                          : "Send"}
                 </button>
               </div>
 
@@ -971,6 +1304,47 @@ export function Chat() {
                 </div>
               )}
 
+              {showSheetPrompt && chatMode === "dataframe" && (
+                <div className="mx-auto mt-2 w-full max-w-2xl rounded-2xl border border-cyan-200 bg-cyan-50 p-3 shadow-sm">
+                  <p className="mb-2 text-xs font-semibold text-cyan-700">Connect Google Sheet</p>
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      value={sheetInput}
+                      onChange={(e) => setSheetInput(e.target.value)}
+                      placeholder="Paste Google Sheet URL or sheet ID"
+                      className="w-full rounded-xl border border-cyan-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-cyan-400"
+                    />
+                    <input
+                      type="text"
+                      value={sheetWorksheet}
+                      onChange={(e) => setSheetWorksheet(e.target.value)}
+                      placeholder="Worksheet name (optional)"
+                      className="w-full rounded-xl border border-cyan-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-cyan-400"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleConnectSheet();
+                        }}
+                        disabled={!sheetInput.trim() || dataframeUploading}
+                        className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-cyan-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Connect
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowSheetPrompt(false)}
+                        className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-100"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {(preparingUpload || pendingAttachments.some((item) => item.uploading)) && (
                 <div className="mx-auto mt-1.5 w-full max-w-3xl px-1 text-xs font-medium text-blue-600">
                   {preparingUpload
@@ -982,6 +1356,12 @@ export function Chat() {
               {ragUploading && (
                 <div className="mx-auto mt-1.5 w-full max-w-3xl px-1 text-xs font-medium text-indigo-600">
                   Processing PDF... {ragUploadProgress}%
+                </div>
+              )}
+
+              {dataframeUploading && (
+                <div className="mx-auto mt-1.5 w-full max-w-3xl px-1 text-xs font-medium text-cyan-600">
+                  Loading dataframe source... {dataframeUploadProgress}%
                 </div>
               )}
             </div>
@@ -1126,3 +1506,130 @@ function SqlResultTable({ rows }: { rows: Array<Record<string, string | number |
     </div>
   );
 }
+
+function DataPreviewTable({ rows }: { rows: Array<Record<string, string | number | boolean | null>> }) {
+  if (!rows.length) {
+    return <p className="text-xs text-slate-500">No table preview available.</p>;
+  }
+
+  const columns = Object.keys(rows[0]);
+
+  return (
+    <div>
+      <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Table Preview</p>
+      <div className="overflow-x-auto rounded-lg border border-slate-200">
+        <table className="min-w-full text-left text-xs">
+          <thead className="bg-slate-100 text-slate-700">
+            <tr>
+              {columns.map((column) => (
+                <th key={column} className="px-3 py-2 font-semibold">{column}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => (
+              <tr key={`df-row-${index}`} className="border-t border-slate-100">
+                {columns.map((column) => (
+                  <td key={`${index}-${column}`} className="px-3 py-2 text-slate-800">
+                    {row[column] === null ? "NULL" : String(row[column])}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ── Research Digest View ──────────────────────────────────────────────────────
+function ResearchDigestView({
+  status,
+  papers,
+  sections,
+  sources,
+  errorText,
+}: {
+  status?: string;
+  papers: ResearchPaper[];
+  sections: ResearchDigestSection[];
+  sources?: ResearchDigestSection;
+  errorText?: string;
+}) {
+  return (
+    <div className="w-full space-y-4 text-sm">
+      {/* Status indicator */}
+      {status && (
+        <p className="flex items-center gap-2 text-[12px] text-violet-600 italic">
+          <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-violet-500" />
+          {status}
+        </p>
+      )}
+
+      {/* Error */}
+      {!status && errorText && errorText.startsWith("Error:") && (
+        <p className="text-red-600 text-xs">{errorText}</p>
+      )}
+
+      {/* Papers grid */}
+      {papers.length > 0 && (
+        <div>
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            Retrieved Papers ({papers.length})
+          </p>
+          <div className="space-y-2">
+            {papers.map((paper, i) => (
+              <div key={i} className="rounded-xl border border-violet-100 bg-violet-50 px-4 py-3">
+                <a
+                  href={paper.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block text-[13px] font-semibold text-violet-800 hover:underline leading-snug"
+                >
+                  [{i + 1}] {paper.title}
+                </a>
+                <p className="mt-0.5 text-[11px] text-slate-500">
+                  {paper.authors.join(", ")}{paper.authors.length > 0 ? " · " : ""}{paper.published}
+                </p>
+                <p className="mt-1 text-[12px] text-slate-700 leading-relaxed line-clamp-3">
+                  {paper.abstract}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Digest sections */}
+      {sections.map((section, i) => (
+        <div key={i}>
+          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            {section.title}
+          </p>
+          <div className="prose prose-sm max-w-none text-slate-800
+            prose-p:my-1 prose-ul:my-1 prose-ul:pl-4 prose-ol:my-1 prose-ol:pl-4
+            prose-li:my-0.5 prose-strong:font-semibold prose-strong:text-slate-900
+          ">
+            <ReactMarkdown>{section.content}</ReactMarkdown>
+          </div>
+        </div>
+      ))}
+
+      {/* Sources */}
+      {sources && (
+        <div>
+          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            {sources.title}
+          </p>
+          <div className="prose prose-sm max-w-none text-slate-700
+            prose-p:my-0.5 prose-li:my-0.5 prose-a:text-violet-700 prose-a:no-underline hover:prose-a:underline
+          ">
+            <ReactMarkdown>{sources.content}</ReactMarkdown>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+

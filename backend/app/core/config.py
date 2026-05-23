@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_SECRET: str = ""
     GOOGLE_REDIRECT_URI: str = ""
     FRONTEND_URL: str = "http://localhost:5174"
+    GOOGLE_SERVICE_ACCOUNT_JSON: str = ""
 
 
 settings = Settings()

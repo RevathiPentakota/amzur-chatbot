@@ -27,3 +27,4 @@ class Thread(Base):
     attachments = relationship("Attachment", back_populates="thread", cascade="all, delete-orphan")
     generated_images = relationship("GeneratedImage", back_populates="thread", cascade="all, delete-orphan")
     pdf_documents = relationship("PdfDocument", back_populates="thread", cascade="all, delete-orphan")
+    dataframe_sources = relationship("DataFrameSource", back_populates="thread", cascade="all, delete-orphan")

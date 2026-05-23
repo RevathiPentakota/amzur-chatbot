@@ -18,6 +18,11 @@ import type {
   ThreadHistoryResponse,
   SqlChatRequest,
   SqlChatResponse,
+  DataFrameSourceResponse,
+  GoogleSheetConnectRequest,
+  DataFrameChatRequest,
+  DataFrameChatResponse,
+  ResearchRequest,
 } from "../types";
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -222,6 +227,67 @@ export async function sqlChat(payload: SqlChatRequest): Promise<SqlChatResponse>
   });
 }
 
+export function uploadDataFrame(
+  file: File,
+  threadId: number,
+  onProgress?: (progress: number) => void,
+): Promise<DataFrameSourceResponse> {
+  return new Promise((resolve, reject) => {
+    const formData = new FormData();
+    formData.append("thread_id", String(threadId));
+    formData.append("file", file);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${API_BASE_URL}/dataframe/upload`, true);
+    xhr.withCredentials = true;
+
+    xhr.upload.onprogress = (event) => {
+      if (!onProgress || !event.lengthComputable) {
+        return;
+      }
+      const percent = Math.round((event.loaded / event.total) * 100);
+      onProgress(percent);
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText) as DataFrameSourceResponse);
+        } catch {
+          reject(new Error("Failed to parse dataframe upload response"));
+        }
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(xhr.responseText) as { detail?: string };
+        reject(new Error(parsed.detail ?? `Dataframe upload failed (${xhr.status})`));
+      } catch {
+        reject(new Error(`Dataframe upload failed (${xhr.status})`));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error("Dataframe upload request failed"));
+    xhr.send(formData);
+  });
+}
+
+export async function connectGoogleSheet(
+  payload: GoogleSheetConnectRequest,
+): Promise<DataFrameSourceResponse> {
+  return api<DataFrameSourceResponse>("/dataframe/google-sheet", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function dataframeChat(payload: DataFrameChatRequest): Promise<DataFrameChatResponse> {
+  return api<DataFrameChatResponse>("/dataframe/chat", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function uploadRagPdf(
   file: File,
   threadId: number,
@@ -264,5 +330,125 @@ export function uploadRagPdf(
 
     xhr.onerror = () => reject(new Error("PDF upload request failed"));
     xhr.send(formData);
+  });
+}
+
+/**
+ * Opens a Server-Sent Events connection to /research/digest and calls the
+ * provided callbacks as each named event arrives. Returns a cleanup function.
+ */
+export function streamResearchDigest(
+  payload: ResearchRequest,
+  callbacks: {
+    onStatus?: (msg: string) => void;
+    onPapers?: (papers: unknown[]) => void;
+    onSection?: (event: string, title: string, content: string) => void;
+    onSources?: (title: string, content: string) => void;
+    onDone?: () => void;
+    onError?: (msg: string) => void;
+  },
+): () => void {
+  const ctrl = new AbortController();
+
+  void (async () => {
+    let resp: Response;
+    try {
+      resp = await fetch(`${API_BASE_URL}/research/digest`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: ctrl.signal,
+      });
+    } catch (err) {
+      if (!(err instanceof DOMException && err.name === "AbortError")) {
+        callbacks.onError?.(err instanceof Error ? err.message : "Network error");
+      }
+      return;
+    }
+
+    if (!resp.ok) {
+      let detail = `${resp.status} ${resp.statusText}`;
+      try {
+        const data = await resp.json() as { detail?: string };
+        if (typeof data?.detail === "string") detail = data.detail;
+      } catch { /* ignore */ }
+      callbacks.onError?.(detail);
+      return;
+    }
+
+    const reader = resp.body?.getReader();
+    if (!reader) { callbacks.onError?.("No response body"); return; }
+    const decoder = new TextDecoder();
+    let buf = "";
+
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      let done = false;
+      let value: Uint8Array | undefined;
+      try {
+        ({ done, value } = await reader.read());
+      } catch {
+        break;
+      }
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+
+      // Process complete SSE events (separated by \n\n)
+      const parts = buf.split("\n\n");
+      buf = parts.pop() ?? "";  // keep incomplete tail
+
+      for (const part of parts) {
+        const lines = part.trim().split("\n");
+        let eventName = "";
+        let dataStr = "";
+        for (const line of lines) {
+          if (line.startsWith("event: ")) eventName = line.slice(7).trim();
+          else if (line.startsWith("data: ")) dataStr = line.slice(6).trim();
+        }
+        if (!eventName || !dataStr) continue;
+
+        let parsed: Record<string, unknown>;
+        try {
+          parsed = JSON.parse(dataStr) as Record<string, unknown>;
+        } catch {
+          continue;
+        }
+
+        if (eventName === "status") {
+          callbacks.onStatus?.(String(parsed.message ?? ""));
+        } else if (eventName === "papers") {
+          callbacks.onPapers?.((parsed.papers as unknown[]) ?? []);
+        } else if (eventName === "sources") {
+          callbacks.onSources?.(String(parsed.title ?? "Sources"), String(parsed.content ?? ""));
+        } else if (eventName === "done") {
+          callbacks.onDone?.();
+        } else if (eventName === "error") {
+          callbacks.onError?.(String(parsed.message ?? "Unknown error"));
+        } else {
+          // key_findings, trends, contradictions, final_summary
+          callbacks.onSection?.(eventName, String(parsed.title ?? ""), String(parsed.content ?? ""));
+        }
+      }
+    }
+  })();
+
+  return () => ctrl.abort();
+}
+
+// ── Tic Tac Toe ──────────────────────────────────────────────────────────────
+
+import type { NewGameResponse, MakeMoveRequest, MakeMoveResponse } from "../types";
+
+export async function newTicTacToeGame(): Promise<NewGameResponse> {
+  return api<NewGameResponse>("/tic-tac-toe/new", { method: "POST" });
+}
+
+export async function makeTicTacToeMove(
+  payload: MakeMoveRequest,
+): Promise<MakeMoveResponse> {
+  return api<MakeMoveResponse>("/tic-tac-toe/move", {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
 }

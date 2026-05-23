@@ -105,3 +105,93 @@ export interface SqlChatResponse {
 	result: Array<Record<string, string | number | boolean | null>>;
 	answer: string;
 }
+
+export interface DataFrameSourceResponse {
+	id: number;
+	user_id: number;
+	thread_id: number;
+	filename: string;
+	file_path: string;
+	source_type: string;
+	google_sheet_id?: string | null;
+	worksheet_name?: string | null;
+	created_at: string;
+	table_preview: Array<Record<string, string | number | boolean | null>>;
+}
+
+export interface GoogleSheetConnectRequest {
+	thread_id: number;
+	sheet: string;
+	worksheet_name?: string;
+}
+
+export interface DataFrameChatRequest {
+	thread_id: number;
+	question: string;
+}
+
+export interface DataFrameChatResponse {
+	answer: string;
+	intermediate_steps: string;
+	table_preview: Array<Record<string, string | number | boolean | null>>;
+}
+
+// ── Research Digest ──────────────────────────────────────────────────────────
+
+export interface ResearchRequest {
+	topic: string;
+	thread_id: number;
+}
+
+export interface ResearchPaper {
+	title: string;
+	authors: string[];
+	abstract: string;
+	published: string;
+	url: string;
+}
+
+export interface ResearchDigestSection {
+	title: string;
+	content: string;
+}
+
+/** Assembled client-side state for a research digest response */
+export interface ResearchDigestMessage {
+	status: string;
+	papers: ResearchPaper[];
+	key_findings?: ResearchDigestSection;
+	trends?: ResearchDigestSection;
+	contradictions?: ResearchDigestSection;
+	final_summary?: ResearchDigestSection;
+	sources?: ResearchDigestSection;
+	done: boolean;
+	error?: string;
+}
+
+// ── Tic Tac Toe ──────────────────────────────────────────────────────────────
+
+export type TicTacToeCell = "X" | "O" | null;
+export type TicTacToeBoard = TicTacToeCell[][];
+
+export interface NewGameResponse {
+	game_id: string;
+	board: TicTacToeBoard;
+	current_turn: string;
+}
+
+export interface MakeMoveRequest {
+	game_id: string;
+	row: number;
+	col: number;
+}
+
+export interface MakeMoveResponse {
+	board: TicTacToeBoard;
+	player_move: string;
+	ai_move: string | null;
+	ai_reasoning: string | null;
+	winner: string | null;
+	game_over: boolean;
+	current_turn: string;
+}
