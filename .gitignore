@@ -15,3 +15,5 @@ build/
 # Secrets (important)
 client_secret*.json
 *.key.json
+
+western-dolphin-494913-q6-abd370e948b0.json
