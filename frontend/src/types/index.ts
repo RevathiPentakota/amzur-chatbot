@@ -40,11 +40,14 @@ export interface ThreadHistoryResponse {
 
 export interface AttachmentItem {
 	id: number;
+	file_id?: number;
 	user_id: number;
 	thread_id: number;
 	original_filename: string;
+	filename?: string;
 	mime_type: string;
 	file_type: "image" | "video" | "table" | "code" | "document";
+	file_url?: string;
 	created_at: string;
 }
 
@@ -79,9 +82,13 @@ export interface ImageGenerateResponse {
 
 export interface RagPdfItem {
 	id: number;
+	file_id?: number;
 	user_id: number;
 	thread_id: number;
 	filename: string;
+	file_type?: string;
+	mime_type?: string;
+	file_url?: string;
 	created_at: string;
 }
 
@@ -108,9 +115,13 @@ export interface SqlChatResponse {
 
 export interface DataFrameSourceResponse {
 	id: number;
+	file_id?: number;
 	user_id: number;
 	thread_id: number;
 	filename: string;
+	file_type?: string;
+	mime_type?: string;
+	file_url?: string;
 	file_path: string;
 	source_type: string;
 	google_sheet_id?: string | null;
@@ -167,6 +178,46 @@ export interface ResearchDigestMessage {
 	sources?: ResearchDigestSection;
 	done: boolean;
 	error?: string;
+}
+
+// ── MCP Agent ───────────────────────────────────────────────────────────────
+
+export interface McpToolInputSchema {
+	type: string;
+	properties: Record<string, { type: string; description?: string; nullable?: boolean }>;
+	required?: string[];
+}
+
+export interface McpToolDefinition {
+	name: string;
+	description: string;
+	input_schema: McpToolInputSchema;
+	output_schema: Record<string, unknown>;
+	requires_thread_id: boolean;
+}
+
+export interface McpAgentRequest {
+	message: string;
+	thread_id?: number;
+	file_context?: string;
+}
+
+export interface McpAgentResponse {
+	answer: string;
+	tool_used: string | null;
+	tool_input: Record<string, unknown> | null;
+	tool_output: Record<string, unknown> | null;
+	reasoning: string;
+}
+
+export interface McpExecuteRequest {
+	tool: string;
+	input: Record<string, unknown>;
+}
+
+export interface McpExecuteResponse {
+	status: string;
+	result: Record<string, unknown>;
 }
 
 // ── Tic Tac Toe ──────────────────────────────────────────────────────────────

@@ -5,9 +5,13 @@ from pydantic import BaseModel
 
 class DataFrameSourceResponse(BaseModel):
     id: int
+    file_id: int
     user_id: int
     thread_id: int
     filename: str
+    file_type: str
+    mime_type: str
+    file_url: str
     file_path: str
     source_type: str
     google_sheet_id: str | None = None

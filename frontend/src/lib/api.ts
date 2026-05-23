@@ -114,6 +114,12 @@ export function attachmentContentUrl(attachmentId: number): string {
   return `${API_BASE_URL}/chat/attachments/${attachmentId}/content`;
 }
 
+export async function listThreadAttachments(threadId: number): Promise<AttachmentItem[]> {
+  return api<AttachmentItem[]>(`/chat/thread/${threadId}/attachments`, {
+    method: "GET",
+  });
+}
+
 export function uploadAttachment(
   file: File,
   threadId: number,
@@ -288,6 +294,12 @@ export async function dataframeChat(payload: DataFrameChatRequest): Promise<Data
   });
 }
 
+export async function listThreadDataFrameSources(threadId: number): Promise<DataFrameSourceResponse[]> {
+  return api<DataFrameSourceResponse[]>(`/dataframe/thread/${threadId}/sources`, {
+    method: "GET",
+  });
+}
+
 export function uploadRagPdf(
   file: File,
   threadId: number,
@@ -434,6 +446,28 @@ export function streamResearchDigest(
   })();
 
   return () => ctrl.abort();
+}
+
+// ── MCP Agent ───────────────────────────────────────────────────────────────
+
+import type { McpAgentRequest, McpAgentResponse, McpExecuteRequest, McpExecuteResponse, McpToolDefinition } from "../types";
+
+export async function getMcpTools(): Promise<McpToolDefinition[]> {
+  return api<McpToolDefinition[]>("/mcp/tools", { method: "GET" });
+}
+
+export async function runMcpAgent(payload: McpAgentRequest): Promise<McpAgentResponse> {
+  return api<McpAgentResponse>("/mcp/agent", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function executeMcpTool(payload: McpExecuteRequest): Promise<McpExecuteResponse> {
+  return api<McpExecuteResponse>("/mcp/execute", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 // ── Tic Tac Toe ──────────────────────────────────────────────────────────────

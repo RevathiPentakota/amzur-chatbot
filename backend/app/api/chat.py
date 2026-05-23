@@ -44,7 +44,18 @@ async def upload_attachment(
     current_user: User = Depends(get_current_user),
 ) -> AttachmentResponse:
     attachment = await attachment_service.upload(db, current_user, thread_id, file)
-    return AttachmentResponse.model_validate(attachment)
+    return AttachmentResponse(
+        id=attachment.id,
+        file_id=attachment.id,
+        user_id=attachment.user_id,
+        thread_id=attachment.thread_id,
+        original_filename=attachment.original_filename,
+        filename=attachment.original_filename,
+        mime_type=attachment.mime_type,
+        file_type=attachment.file_type,
+        file_url=f"/chat/attachments/{attachment.id}/content",
+        created_at=attachment.created_at,
+    )
 
 
 @router.get("/attachments/{attachment_id}/content")
@@ -59,6 +70,16 @@ async def get_attachment_content(
         media_type=attachment.mime_type,
         filename=attachment.original_filename,
     )
+
+
+@router.get("/thread/{thread_id}/attachments", response_model=list[AttachmentResponse])
+async def list_thread_attachments(
+    thread_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[AttachmentResponse]:
+    items = await attachment_service.list_thread_attachments(db, current_user, thread_id)
+    return [AttachmentResponse.model_validate(item) for item in items]
 
 
 @router.get("/history", response_model=list[ChatHistoryItem])

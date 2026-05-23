@@ -157,6 +157,20 @@ class DataFrameChatService:
             raise ValueError("No data source found. Upload a CSV/XLSX file or connect a Google Sheet first.")
         return source
 
+    async def list_thread_sources(
+        self,
+        db: AsyncSession,
+        user: User,
+        thread_id: int,
+    ) -> list[DataFrameSource]:
+        await self._ensure_thread(db, user, thread_id)
+        result = await db.scalars(
+            select(DataFrameSource)
+            .where(DataFrameSource.user_id == user.id, DataFrameSource.thread_id == thread_id)
+            .order_by(DataFrameSource.created_at.asc(), DataFrameSource.id.asc())
+        )
+        return list(result)
+
     async def upload_file(
         self,
         db: AsyncSession,

@@ -2,12 +2,13 @@ import { useEffect, useState } from "react";
 
 import { Chat } from "./components/Chat";
 import { Login } from "./components/Login";
+import { MCPAgent } from "./components/MCPAgent";
 import { TicTacToe } from "./components/TicTacToe";
 import { getThreads } from "./lib/api";
 
 import "./App.css";
 
-type AppView = "chat" | "tictactoe";
+type AppView = "chat" | "tictactoe" | "mcp";
 
 function App() {
   const [authenticated, setAuthenticated] = useState(false);
@@ -61,11 +62,21 @@ function App() {
         >
           Tic Tac Toe
         </button>
+        <button
+          onClick={() => setView("mcp")}
+          className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+            view === "mcp"
+              ? "bg-indigo-600 text-white"
+              : "text-slate-400 hover:text-white hover:bg-slate-700"
+          }`}
+        >
+          MCP Agent
+        </button>
       </nav>
 
       {/* Main content */}
       <div className="flex-1 min-h-0 overflow-auto">
-        {view === "chat" ? <Chat /> : <TicTacToe />}
+        {view === "chat" ? <Chat /> : view === "tictactoe" ? <TicTacToe /> : <MCPAgent />}
       </div>
     </div>
   );

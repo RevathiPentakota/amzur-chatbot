@@ -35,7 +35,17 @@ async def upload_pdf(
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    return RagUploadResponse.model_validate(record)
+    return RagUploadResponse(
+        id=record.id,
+        file_id=record.id,
+        user_id=record.user_id,
+        thread_id=record.thread_id,
+        filename=record.filename,
+        file_type="pdf",
+        mime_type="application/pdf",
+        file_url=f"/rag/pdfs/{record.id}/content",
+        created_at=record.created_at,
+    )
 
 
 @router.post("/chat", response_model=RagChatResponse)
@@ -64,7 +74,20 @@ async def list_thread_pdfs(
         items = await rag_service.list_thread_pdfs(db, current_user, thread_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return [RagPdfItem.model_validate(item) for item in items]
+    return [
+        RagPdfItem(
+            id=item.id,
+            file_id=item.id,
+            user_id=item.user_id,
+            thread_id=item.thread_id,
+            filename=item.filename,
+            file_type="pdf",
+            mime_type="application/pdf",
+            file_url=f"/rag/pdfs/{item.id}/content",
+            created_at=item.created_at,
+        )
+        for item in items
+    ]
 
 
 @router.get("/pdfs/{pdf_id}/content")

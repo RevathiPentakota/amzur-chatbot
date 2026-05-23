@@ -162,6 +162,8 @@ class AttachmentService:
         db.add(item)
         await db.commit()
         await db.refresh(item)
+        saved_attachment = item
+        print(saved_attachment)
         return item
 
     async def resolve_for_chat(
@@ -200,6 +202,20 @@ class AttachmentService:
         if not attachment:
             raise HTTPException(status_code=404, detail="Attachment not found")
         return attachment
+
+    async def list_thread_attachments(
+        self,
+        db: AsyncSession,
+        user: User,
+        thread_id: int,
+    ) -> list[Attachment]:
+        await self._get_user_thread(db, user, thread_id)
+        result = await db.scalars(
+            select(Attachment)
+            .where(Attachment.user_id == user.id, Attachment.thread_id == thread_id)
+            .order_by(Attachment.created_at.asc(), Attachment.id.asc())
+        )
+        return list(result)
 
     @staticmethod
     def read_text_context(attachment: Attachment, max_chars: int = 4000) -> str:
