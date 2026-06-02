@@ -1,4 +1,8 @@
-"""LangGraph workflow for autonomous arXiv research digests."""
+"""LangGraph workflow for autonomous arXiv research digests.
+
+arXiv access is intentionally decoupled: all paper retrieval goes through the
+external MCP server via McpResearchClient. This module never imports arxiv directly.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -8,15 +12,15 @@ import re
 from difflib import SequenceMatcher
 from typing import Any, Literal, TypedDict
 
-import arxiv
 import httpx
 from langgraph.graph import END, START, StateGraph
 
+from app.agents.research_agent import mcp_research_client
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-SEARCH_TIMEOUT_SECONDS = 60
+SEARCH_TIMEOUT_SECONDS = 30
 MAX_ROUNDS = 3
 MAX_PAPERS_TOTAL = 12
 MAX_RESULTS_PER_ROUND = 5
@@ -47,6 +51,7 @@ class ResearchState(TypedDict):
     digest_sections: dict[str, str]
     final_digest: str
     error: str
+    mcp_tools: list[dict[str, Any]]
 
 
 def _normalize_query(raw: str) -> str:
@@ -106,6 +111,14 @@ def _compute_relevance(query: str, paper: ResearchPaper) -> tuple[float, bool, s
     return score, strong_title_match, reason
 
 
+def _has_strong_abstract_keyword_match(query: str, abstract: str) -> tuple[bool, float]:
+    q_tokens = _tokenize(query)
+    if not q_tokens:
+        return False, 0.0
+    overlap = len(q_tokens & _tokenize(abstract)) / len(q_tokens)
+    return overlap >= 0.30, overlap
+
+
 def _json_load(text: str) -> dict[str, Any]:
     try:
         return json.loads(text)
@@ -142,59 +155,68 @@ async def _llm_call(prompt: str, system: str = "", max_tokens: int = 1200) -> st
         return data["choices"][0]["message"]["content"]
 
 
-def _search_arxiv_sync(query: str, max_results: int) -> list[ResearchPaper]:
-    logger.info("arXiv search query: %s", query)
-    search = arxiv.Search(
-        query=query,
-        max_results=max_results,
-        sort_by=arxiv.SortCriterion.Relevance,
-    )
-
-    # Use Search.results() to satisfy retrieval requirement.
-    results = list(search.results())
-    logger.info("arXiv result count for query '%s': %s", query, len(results))
-
-    papers: list[ResearchPaper] = []
-    for item in results:
-        paper_id = (item.entry_id or "").strip()
-        papers.append(
-            {
-                "id": paper_id,
-                "title": (item.title or "").strip(),
-                "authors": [author.name for author in item.authors[:8]],
-                "abstract": (item.summary or "").strip(),
-                "published": item.published.strftime("%Y-%m-%d") if item.published else "Unknown",
-                "url": paper_id,
-                "pdf_url": item.pdf_url or paper_id,
-            }
-        )
-    if papers:
-        logger.info("Retrieved titles for '%s': %s", query, [paper["title"] for paper in papers])
-    return papers
-
-
-async def _search_arxiv(query: str, max_results: int) -> list[ResearchPaper]:
-    loop = asyncio.get_event_loop()
+async def _search_via_mcp(query: str, max_results: int) -> list[ResearchPaper]:
+    """Retrieve papers through the external MCP server (never imports arxiv directly)."""
     try:
-        return await asyncio.wait_for(
-            loop.run_in_executor(None, _search_arxiv_sync, query, max_results),
+        data = await asyncio.wait_for(
+            mcp_research_client.search_papers(query, max_results),
             timeout=SEARCH_TIMEOUT_SECONDS,
         )
+
+        # Be resilient to either direct result shape ({papers: [...]}) or wrapped shape ({result: {papers: [...]}}).
+        payload: dict[str, Any] = data
+        if isinstance(data.get("result"), dict):
+            payload = data["result"]
+
+        logger.info("Raw MCP response for query=%r: keys=%s", query, list(payload.keys()))
+
+        raw_papers_data = payload.get("papers", [])
+        raw_papers: list[dict[str, Any]] = raw_papers_data if isinstance(raw_papers_data, list) else []
+
+        papers: list[ResearchPaper] = [
+            {
+                "id": str(p.get("id", "")),
+                "title": str(p.get("title", "")),
+                "authors": list(p.get("authors", [])),
+                "abstract": str(p.get("abstract") or p.get("summary") or ""),
+                "published": str(p.get("published", "Unknown")),
+                "url": str(p.get("url") or p.get("pdf_url") or ""),
+                "pdf_url": str(p.get("pdf_url", "")),
+            }
+            for p in raw_papers
+        ]
+
+        logger.info("Parsed papers count=%d for query=%r", len(papers), query)
+        if papers:
+            logger.info("Parsed paper titles=%s", [p["title"] for p in papers[:10]])
+
+        return papers
     except asyncio.TimeoutError:
-        logger.warning("arXiv search timeout for query: %s", query)
+        logger.warning("MCP arxiv_search timeout for query: %r", query)
         return []
     except Exception as exc:
-        logger.warning("arXiv search failed: %s", exc)
+        logger.warning("MCP arxiv_search failed for query %r: %s", query, exc)
         return []
+
+
+async def discover_mcp_tools(state: ResearchState) -> dict[str, Any]:
+    """First graph node: discover available tools from the external MCP server."""
+    try:
+        tools = await asyncio.wait_for(mcp_research_client.list_tools(), timeout=10)
+        logger.info("MCP tools discovered: %s", [t.get("name") for t in tools])
+    except Exception as exc:
+        logger.warning("MCP tool discovery failed (continuing without discovery): %s", exc)
+        tools = []
+    return {"mcp_tools": tools}
 
 
 async def search_arxiv(state: ResearchState) -> dict[str, Any]:
     round_idx = state["search_round"] + 1
     query = _normalize_query(state["query"])
 
-    # 1) Exact title query first.
-    exact_query = f'ti:"{query}"'
-    found = await _search_arxiv(exact_query, MAX_RESULTS_PER_ROUND)
+    # Use canonical topic query; the arXiv MCP tool handles exact-title strategy internally.
+    exact_query = query
+    found = await _search_via_mcp(exact_query, MAX_RESULTS_PER_ROUND)
 
     # 2) Fallback broader query if exact has no results.
     if not found:
@@ -229,7 +251,7 @@ async def search_arxiv(state: ResearchState) -> dict[str, Any]:
             ordered_fallback.append(norm_item)
 
         for fallback_query in ordered_fallback:
-            fallback_found = await _search_arxiv(fallback_query, MAX_RESULTS_PER_ROUND)
+            fallback_found = await _search_via_mcp(fallback_query, MAX_RESULTS_PER_ROUND)
             if fallback_found:
                 found = fallback_found
                 break
@@ -247,7 +269,7 @@ async def search_arxiv(state: ResearchState) -> dict[str, Any]:
     new_papers: list[ResearchPaper] = []
     rejection_logs: list[str] = []
 
-    # Rank candidates by relevance but keep filtering conservative.
+    # Rank candidates by relevance but always keep strong title/abstract matches.
     scored: list[tuple[float, bool, str, ResearchPaper]] = []
     for paper in found:
         score, strong_match, detail = _compute_relevance(query, paper)
@@ -255,21 +277,35 @@ async def search_arxiv(state: ResearchState) -> dict[str, Any]:
     scored.sort(key=lambda x: x[0], reverse=True)
 
     for score, strong_match, detail, paper in scored:
+        strong_abs_match, abs_overlap = _has_strong_abstract_keyword_match(query, paper["abstract"])
+
         if paper["id"] and paper["id"] in existing_ids:
             rejection_logs.append(f"Rejected duplicate: '{paper['title']}' ({detail})")
             continue
 
-        # Keep strong title matches even with low semantic overlap.
-        if score < LOW_RELEVANCE_THRESHOLD and not strong_match:
-            rejection_logs.append(f"Rejected low relevance: '{paper['title']}' ({detail})")
+        # Always keep if strong title or strong abstract keyword match.
+        keep_due_to_match = strong_match or strong_abs_match
+
+        if score < LOW_RELEVANCE_THRESHOLD and not keep_due_to_match:
+            rejection_logs.append(
+                f"Rejected low relevance: '{paper['title']}' ({detail}, abs_overlap={abs_overlap:.2f})"
+            )
             continue
 
         merged.append(paper)
         new_papers.append(paper)
-        logger.info("Accepted paper: '%s' (score=%.2f, strong_title=%s)", paper["title"], score, strong_match)
+        logger.info(
+            "Accepted paper: '%s' (score=%.2f, strong_title=%s, strong_abs=%s, abs_overlap=%.2f)",
+            paper["title"],
+            score,
+            strong_match,
+            strong_abs_match,
+            abs_overlap,
+        )
         if len(merged) >= MAX_PAPERS_TOTAL:
             break
 
+    logger.info("Filtered papers: accepted=%d rejected=%d", len(new_papers), len(rejection_logs))
     for line in rejection_logs:
         logger.info(line)
 
@@ -357,6 +393,7 @@ async def evaluate_evidence(state: ResearchState) -> dict[str, Any]:
     best_title_sim = max(title_sims) if title_sims else 0.0
     avg_title_sim = sum(title_sims) / len(title_sims) if title_sims else 0.0
     avg_abs_rel = sum(abstract_rel) / len(abstract_rel) if abstract_rel else 0.0
+    strong_semantic_hits = sum(1 for rel in abstract_rel if rel >= 0.30)
 
     score = min(
         1.0,
@@ -378,6 +415,8 @@ async def evaluate_evidence(state: ResearchState) -> dict[str, Any]:
     enough = (
         (score >= 0.68)
         or (strong_title_hits >= 1 and best_title_sim >= 0.78 and avg_abs_rel >= 0.15)
+        or (strong_title_hits >= 1 and best_title_sim >= 0.78)
+        or (strong_semantic_hits >= 1)
         or (strong_title_hits >= 2 and papers_count >= 3)
         or (state["search_round"] >= state["max_rounds"])
     )
@@ -398,6 +437,17 @@ async def evaluate_evidence(state: ResearchState) -> dict[str, Any]:
 
     if state["search_round"] >= state["max_rounds"]:
         enough = True
+
+    logger.info(
+        "Evidence evaluation: score=%.3f confidence=%.3f enough=%s strong_title_hits=%d strong_semantic_hits=%d best_title_sim=%.2f avg_abs_rel=%.2f",
+        score,
+        confidence,
+        enough,
+        strong_title_hits,
+        strong_semantic_hits,
+        best_title_sim,
+        avg_abs_rel,
+    )
 
     return {
         "evidence_score": round(score, 3),
@@ -524,13 +574,15 @@ def _route_from_decision(state: ResearchState) -> str:
 def build_research_graph() -> Any:
     graph = StateGraph(ResearchState)
 
+    graph.add_node("discover_mcp_tools", discover_mcp_tools)
     graph.add_node("search_arxiv", search_arxiv)
     graph.add_node("summarize_papers", summarize_papers)
     graph.add_node("evaluate_evidence", evaluate_evidence)
     graph.add_node("decide_next_step", decide_next_step)
     graph.add_node("generate_digest", generate_digest)
 
-    graph.add_edge(START, "search_arxiv")
+    graph.add_edge(START, "discover_mcp_tools")
+    graph.add_edge("discover_mcp_tools", "search_arxiv")
     graph.add_edge("search_arxiv", "summarize_papers")
     graph.add_edge("summarize_papers", "evaluate_evidence")
     graph.add_edge("evaluate_evidence", "decide_next_step")

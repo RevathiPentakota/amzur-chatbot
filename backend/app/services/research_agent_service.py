@@ -37,7 +37,9 @@ def _initial_state(topic: str) -> ResearchState:
         "digest_sections": {},
         "final_digest": "",
         "error": "",
+        "mcp_tools": [],
     }
+
 
 
 async def _persist_research_chat(
@@ -90,6 +92,11 @@ async def generate_research_digest(
                     yield _sse("status", {"message": f"Round {round_no}: searched arXiv, total papers {len(papers)}."})
                     if papers:
                         yield _sse("papers", {"papers": papers})
+
+                elif node_name == "discover_mcp_tools":
+                    tools = state.get("mcp_tools", [])
+                    tool_names = [t.get("name") for t in tools]
+                    yield _sse("status", {"message": f"Discovered {len(tools)} MCP tools: {tool_names}"})
 
                 elif node_name == "summarize_papers":
                     yield _sse("status", {"message": f"Round {state.get('search_round', 0)}: summarized papers."})

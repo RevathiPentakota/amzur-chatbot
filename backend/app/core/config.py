@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     AUTH_COOKIE_NAME: str = "access_token"
+    RESEARCH_MCP_SERVER_URL: str = "http://localhost:8001"
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
     GOOGLE_REDIRECT_URI: str = ""

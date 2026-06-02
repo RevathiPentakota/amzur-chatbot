@@ -139,6 +139,49 @@ TOOL_REGISTRY: list[McpToolDefinition] = [
         requires_thread_id=True,
     ),
     McpToolDefinition(
+        name="arxiv_search",
+        description=(
+            "Search arXiv for academic papers matching a query string. "
+            "Returns paper metadata including title, authors, abstract, and links."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query (title, keywords, author, etc.).",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum number of papers to return (1-20). Default 5.",
+                },
+            },
+            "required": ["query"],
+        },
+        output_schema={
+            "type": "object",
+            "properties": {
+                "papers": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "title": {"type": "string"},
+                            "authors": {"type": "array", "items": {"type": "string"}},
+                            "abstract": {"type": "string"},
+                            "published": {"type": "string"},
+                            "url": {"type": "string"},
+                            "pdf_url": {"type": "string"},
+                        },
+                    },
+                },
+                "total": {"type": "integer"},
+            },
+        },
+        requires_thread_id=False,
+    ),
+    McpToolDefinition(
         name="research_tool",
         description=(
             "Search arXiv for academic papers on a topic, summarise findings, identify trends "

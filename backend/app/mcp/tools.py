@@ -126,6 +126,29 @@ async def _exec_dataframe_analysis(
     }
 
 
+async def _exec_arxiv_search(
+    data: dict[str, Any],
+    db: AsyncSession,
+    user: User,
+) -> dict[str, Any]:
+    _require(data, "query")
+    from app.agents.research_agent import mcp_research_client
+
+    query = str(data["query"]).strip()
+    max_results = int(data.get("max_results", 5))
+
+    logger.info("MCP arxiv_search incoming query=%r", query)
+    result = await mcp_research_client.search_papers(query=query, max_results=max_results)
+
+    papers = result.get("papers", [])
+    titles = [str(p.get("title", "")).strip() for p in papers if isinstance(p, dict)]
+
+    logger.info("MCP arxiv_search retrieved paper count=%d", len(papers))
+    logger.info("MCP arxiv_search retrieved paper titles=%s", titles)
+
+    return result
+
+
 async def _exec_research(
     data: dict[str, Any],
     db: AsyncSession,
@@ -228,6 +251,7 @@ _EXECUTORS = {
     "sql_query_tool": _exec_sql_query,
     "pdf_rag_tool": _exec_pdf_rag,
     "dataframe_analysis_tool": _exec_dataframe_analysis,
+    "arxiv_search": _exec_arxiv_search,
     "research_tool": _exec_research,
     "image_generation_tool": _exec_image_generation,
     "image_vision_tool": _exec_image_vision,
